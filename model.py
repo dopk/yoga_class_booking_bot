@@ -41,7 +41,7 @@ class Studio(BaseModel):
 class YogaClass(BaseModel):
     """Yoga class data model"""
     name: str
-    room_id: int
+    studio_id: int
     teacher_id: int
     start_time: date
     duration: int
@@ -115,7 +115,7 @@ class TeacherRepository(BaseRepository):
         return [Teacher.from_dict(dict(row)) for row in cursor.fetchall()]
 
 
-class RoomRepository(BaseRepository):
+class StudioRepository(BaseRepository):
     """Repository for studio operations"""
 
     def __init__(self, db_manager: DatabaseManager):
@@ -255,7 +255,7 @@ def example_usage():
     with DatabaseManager("yoga_booking.db") as db:
         # Initialize repositories
         teacher_repo = TeacherRepository(db)
-        room_repo = RoomRepository(db)
+        studio_repo = StudioRepository(db)
         student_repo = StudentRepository(db)
 
         # Add sample data
@@ -275,7 +275,7 @@ def example_usage():
         #     notes="Ballet specialist"
         # ))
 
-        # studio_id = room_repo.add_studio(Studio(
+        # studio_id = studio_repo.add_studio(Studio(
         #     name="Grand Ballet Hall 5",
         #     address="123 Dance Street",
         #     has_shower=True,
@@ -292,7 +292,7 @@ def example_usage():
         # Retrieve data
         active_teachers = teacher_repo.get_teachers_by_payment_status()
         anna_petrova = teacher_repo.get_teachers_by_username("anna_ballerina")
-        studios_with_showers = room_repo.get_studios_with_showers()
+        studios_with_showers = studio_repo.get_studios_with_showers()
         new_students = student_repo.get_recent_students(7)
 
         print(f"Active teachers: {active_teachers}")
