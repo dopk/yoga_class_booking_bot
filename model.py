@@ -51,21 +51,22 @@ class YogaClass(BaseModel):
 
 
 @dataclass
-class YogaClassBooking(BaseModel):
-    """Yoga class booking data model"""
-    class_id: int
-    student_id: int
-    approved: bool = False
-    notes: str = ''
-    id: int | None = None
-
-@dataclass
 class Student(BaseModel):
     """Student data model"""
     display_name: str
     username: str
     registration_date: date
     notes: str = ""
+    id: int | None = None
+
+
+@dataclass
+class YogaClassBooking(BaseModel):
+    """Yoga class booking data model"""
+    class_id: int
+    student_id: int
+    approved: bool = False
+    notes: str = ''
     id: int | None = None
 
 
@@ -193,20 +194,6 @@ class YogaClassRepository(BaseRepository):
         return [YogaClass.from_dict(dict(row)) for row in cursor.fetchall()]
 
 
-class YogaClassBookingRepository(BaseRepository):
-    """Repository for Book place on class for student"""
-
-    def __init__(self, db_manager: DatabaseManager):
-        super().__init__(db_manager, "class_booking")
-        self.create_table("""
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            class_id INTEGER NOT NULL,
-            student_id INTEGER NOT NULL,
-            approved: BOOLEAN NOT NULL DEFAULT 0,
-            notes TEXT DEFAULT ''
-        """)
-
-
 class StudentRepository(BaseRepository):
     """Repository for student operations"""
 
@@ -248,6 +235,20 @@ class StudentRepository(BaseRepository):
         """
         cursor = self.db.execute_query(query)
         return [Student.from_dict(dict(row)) for row in cursor.fetchall()]
+
+
+class YogaClassBookingRepository(BaseRepository):
+    """Repository for Book place on class for student"""
+
+    def __init__(self, db_manager: DatabaseManager):
+        super().__init__(db_manager, "class_booking")
+        self.create_table("""
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL,
+            student_id INTEGER NOT NULL,
+            approved: BOOLEAN NOT NULL DEFAULT 0,
+            notes TEXT DEFAULT ''
+        """)
 
 
 def example_usage():
