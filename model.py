@@ -1,9 +1,9 @@
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 import logging
-from typing import Any, Self
 
 from storage import BaseModel, BaseRepository, DatabaseManager
+
 
 # Configure logging
 logging.basicConfig(
@@ -12,6 +12,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+@dataclass
+class Admin(BaseModel):
+    """Teacher data model"""
+    username: str
+    display_name: str
+    registration_date: date
+    notes: str = ""
+    id: int | None = None
 
 # ... (keep all the previous imports and base classes from our original code) ...
 
@@ -66,8 +75,47 @@ class YogaClassBooking(BaseModel):
     class_id: int
     student_id: int
     approved: bool = False
+    canceled: bool = False
+    cancel_date: date = None
+    canceled_by: str = ''
     notes: str = ''
     id: int | None = None
+
+
+class AdminRepository(BaseRepository):
+    """Repository for admin operations"""
+
+    def __init__(self, db_manager: DatabaseManager):
+        super().__init__(db_manager, "admins")
+        self.create_table("""
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            registration_date DATE NOT NULL,
+            notes TEXT DEFAULT ''
+        """)
+
+    def add_admin(self, admin: Admin) -> int:
+        """Insert a new admin with validation
+        returns admin.id"""
+        searched_admin = self.get_admins_by_username(admin.username)
+        if searched_admin:
+            logger.info("admin with username %s already exist",admin.username)
+            return searched_admin.id
+        return self.insert(admin.to_dict())
+
+    def get_admins_by_username(self, username: str) -> Admin | None:
+        """Get admin by username"""
+        query = """
+            SELECT id, username, display_name, registration_date, payment_end_date, notes FROM %s
+            WHERE username = "%s"
+        """ %(self.table_name, username)
+        admin = self.db.execute_query(query).fetchone()
+        if admin:
+            return Admin.from_dict(dict(admin))
+        return None
+    
+    #TODO: methods to change admin attributes
 
 
 class TeacherRepository(BaseRepository):
@@ -115,6 +163,8 @@ class TeacherRepository(BaseRepository):
         cursor = self.db.execute_query(query)
         return [Teacher.from_dict(dict(row)) for row in cursor.fetchall()]
 
+    #TODO: methods to change teacher attributes
+
 
 class StudioRepository(BaseRepository):
     """Repository for studio operations"""
@@ -127,13 +177,14 @@ class StudioRepository(BaseRepository):
             address TEXT NOT NULL,
             has_shower BOOLEAN NOT NULL DEFAULT 0,
             added_date DATE NOT NULL,
+            capacity INT NOT NULL DEFAULT 0,
             notes TEXT DEFAULT ''
         """)
 
     def get_studio_by_name(self, name: str) -> Studio | None:
         """Get studio by name"""
         query = f"""
-            SELECT id, name, address, has_shower, added_date, notes FROM {self.table_name}
+            SELECT id, name, address, has_shower, added_date, capacity, notes FROM {self.table_name}
             WHERE name = "{name}"
         """
         studio = self.db.execute_query(query).fetchone()
@@ -155,6 +206,8 @@ class StudioRepository(BaseRepository):
         query = f"SELECT * FROM {self.table_name} WHERE has_shower = 1"
         cursor = self.db.execute_query(query)
         return [Studio.from_dict(dict(row)) for row in cursor.fetchall()]
+    
+    #TODO: methods to change studio attributes
 
 
 class YogaClassRepository(BaseRepository):
@@ -192,6 +245,8 @@ class YogaClassRepository(BaseRepository):
         """ %(self.table_name, studio_id)
         cursor = self.db.execute_query(query)
         return [YogaClass.from_dict(dict(row)) for row in cursor.fetchall()]
+
+    #TODO: methods to change yoga class attributes
 
 
 class StudentRepository(BaseRepository):
@@ -237,6 +292,8 @@ class StudentRepository(BaseRepository):
         return [Student.from_dict(dict(row)) for row in cursor.fetchall()]
 
 
+    #TODO: methods to change studen attributes
+
 class YogaClassBookingRepository(BaseRepository):
     """Repository for Book place on class for student"""
 
@@ -246,9 +303,45 @@ class YogaClassBookingRepository(BaseRepository):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             class_id INTEGER NOT NULL,
             student_id INTEGER NOT NULL,
-            approved: BOOLEAN NOT NULL DEFAULT 0,
+            approved BOOLEAN NOT NULL DEFAULT 0,
+            canceled BOOLEAN NOT NULL DEFAULT 0,
+            cancel_date DATE DEFAULT NULL,
+            canceled_by TEXT DEFAULT '',
             notes TEXT DEFAULT ''
         """)
+
+
+    def add_booking(self, booking: YogaClassBooking) -> int:
+        """Insert booiking, return bookig id"""
+        student_booking = self.get_all_yoga_class_students(booking.class_id)
+        if booking.student_id in student_booking.keys():
+            logger.info("booking on class id: %s student with id: %s is already exist" %(booking.class_id, booking.student_id))
+            return student_booking[booking.student_id]
+        return self.insert(booking.to_dict())        
+    
+    def approve_student_to_class(self, booking: YogaClassBooking) -> int:
+        #TODO: update row about booking, approve
+        student_id = booking.student_id
+        yoga_class_id = booking.class_id
+        query = """
+            UPDATE SET approve = t
+            WHERE class_id = "%s" AND student_id = "%s"
+        """ %(yoga_class_id, student_id)
+        cursor = self.db.execute_query(query)
+        return cursor.lastrowid
+
+        
+    def get_all_unaproved_on_yoga_class_students(self, yoga_class_id):
+        return yoga_class_id
+        # TODO: select all unapprobed students on yoga class
+    
+    def get_all_yoga_class_students(self, yoga_class_id) -> dict[int: int]:
+        """
+        Return: dict of {stufetn_id: booking_id}
+        """
+        # TODO: write function get_all_yoga_class_students
+        return {yoga_class_id: 1}
+
 
 
 def example_usage():
@@ -261,34 +354,35 @@ def example_usage():
 
         # Add sample data
         teacher_id = teacher_repo.add_teacher(Teacher(
-            username="anna_ballerina911",
+            username="anna_ballerina",
             display_name="Anna Petrova",
             registration_date=date(2023, 1, 15),
             payment_end_date=date(2024, 1, 15),
             notes="Ballet specialist"
         ))
 
-        # teacher2_id = teacher_repo.add_teacher(Teacher(
-        #     username="kate_ballerina",
-        #     display_name="Kate Petrova",
-        #     registration_date=date(2023, 1, 15),
-        #     payment_end_date=date(2030, 1, 15),
-        #     notes="Ballet specialist"
-        # ))
+        teacher2_id = teacher_repo.add_teacher(Teacher(
+            username="kate_ballerina",
+            display_name="Kate Petrova",
+            registration_date=date(2023, 1, 15),
+            payment_end_date=date(2030, 1, 15),
+            notes="Ballet specialist"
+        ))
 
-        # studio_id = studio_repo.add_studio(Studio(
-        #     name="Grand Ballet Hall 5",
-        #     address="123 Dance Street",
-        #     has_shower=True,
-        #     added_date=date.today(),
-        #     notes="Main studio with mirrors"dict(row)) for row in cursor.fetchall(
-        # ))
+        studio_id = studio_repo.add_studio(Studio(
+            name="Grand Ballet Hall 5",
+            address="123 Dance Street",
+            has_shower=True,
+            capacity = 23,
+            added_date=date.today(),
+            notes = "Main studio with mirrors"
+        ))
 
-        # student_id = student_repo.add_student(Student(
-        #     username="little_dancer 5",
-        #     display_name="Maria Ivanova",
-        #     registration_date=date.today()
-        # ))
+        student_id = student_repo.add_student(Student(
+            username="little_dancer 5",
+            display_name="Maria Ivanova",
+            registration_date=date.today()
+        ))
 
         # Retrieve data
         active_teachers = teacher_repo.get_teachers_by_payment_status()
@@ -299,9 +393,8 @@ def example_usage():
         print(f"Active teachers: {active_teachers}")
         print(f"Studios with showers: {studios_with_showers}")
         print(f"New students: {new_students}")
-        print(f"Teacher by username:", anna_petrova.username)
         if anna_petrova:
-            print("ticher suschestvuet")
+            print(f"Teacher by username:", anna_petrova.username)
 
 
 if __name__ == "__main__":
