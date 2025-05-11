@@ -1,6 +1,6 @@
 #TODO: bot itself
-#TODO: remove and update methods to all
 #TODO: add "active" attribute to all
+#TODO: deaxtivate (remove) and update methods to all
 #TODO: note teacher about students unbooked class
 #TODO: minimal count of students for class, and auto unplan class if not enough students
 #TODO: add student, studio and teacher rating

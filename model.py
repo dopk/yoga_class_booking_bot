@@ -114,8 +114,6 @@ class AdminRepository(BaseRepository):
         if admin:
             return Admin.from_dict(dict(admin))
         return None
-    
-    #TODO: methods to change admin attributes
 
 
 class TeacherRepository(BaseRepository):
@@ -163,8 +161,6 @@ class TeacherRepository(BaseRepository):
         cursor = self.db.execute_query(query)
         return [Teacher.from_dict(dict(row)) for row in cursor.fetchall()]
 
-    #TODO: methods to change teacher attributes
-
 
 class StudioRepository(BaseRepository):
     """Repository for studio operations"""
@@ -206,8 +202,6 @@ class StudioRepository(BaseRepository):
         query = f"SELECT * FROM {self.table_name} WHERE has_shower = 1"
         cursor = self.db.execute_query(query)
         return [Studio.from_dict(dict(row)) for row in cursor.fetchall()]
-    
-    #TODO: methods to change studio attributes
 
 
 class YogaClassRepository(BaseRepository):
@@ -245,8 +239,6 @@ class YogaClassRepository(BaseRepository):
         """ %(self.table_name, studio_id)
         cursor = self.db.execute_query(query)
         return [YogaClass.from_dict(dict(row)) for row in cursor.fetchall()]
-
-    #TODO: methods to change yoga class attributes
 
 
 class StudentRepository(BaseRepository):
@@ -292,8 +284,6 @@ class StudentRepository(BaseRepository):
         return [Student.from_dict(dict(row)) for row in cursor.fetchall()]
 
 
-    #TODO: methods to change studen attributes
-
 class YogaClassBookingRepository(BaseRepository):
     """Repository for Book place on class for student"""
 
@@ -315,7 +305,7 @@ class YogaClassBookingRepository(BaseRepository):
         """Insert booiking, return bookig id"""
         student_booking = self.get_all_yoga_class_students(booking.class_id)
         if booking.student_id in student_booking.keys():
-            logger.info("booking on class id: %s student with id: %s is already exist" %(booking.class_id, booking.student_id))
+            logger.info("booking on class id: %s student with id: %s is already exist", booking.class_id, booking.student_id)
             return student_booking[booking.student_id]
         return self.insert(booking.to_dict())        
     
@@ -394,7 +384,7 @@ def example_usage():
         print(f"Studios with showers: {studios_with_showers}")
         print(f"New students: {new_students}")
         if anna_petrova:
-            print(f"Teacher by username:", anna_petrova.username)
+            print("Teacher by username:", anna_petrova.username)
 
 
 if __name__ == "__main__":
