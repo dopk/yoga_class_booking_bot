@@ -53,8 +53,8 @@ class YogaClass(BaseModel):
     studio_id: int
     teacher_id: int
     start_time: date
-    duration: int
-    capacity: int # in minutes
+    duration: int # in minutes
+    capacity: int
     notes: str = ""
     id: int | None = None
 
@@ -220,7 +220,7 @@ class YogaClassRepository(BaseRepository):
             notes TEXT DEFAULT ''
         """)
 
-    def get_class_by_teacher_id(self, teacher_id: int) -> list[YogaClass]:
+    def get_classes_by_teacher_id(self, teacher_id: int) -> list[YogaClass]:
         query = """
             SELECT id, name, studio_id, teacher_id, start_time, duration, capacity, notes FROM %s
             WHERE teacher_id = "%s"
@@ -229,6 +229,16 @@ class YogaClassRepository(BaseRepository):
         """ %(self.table_name, teacher_id)
         cursor = self.db.execute_query(query)
         return [YogaClass.from_dict(dict(row)) for row in cursor.fetchall()]
+
+    def add_yoga_class(self, yoga_class: YogaClass) -> int:
+        """Insert a new yoga class with validation
+        returns yoga class id"""
+        teacher_yoga_classes = self.get_classes_by_teacher_id(yoga_class.teacher_id)
+        for teacher_yoga_class in teacher_yoga_classes:
+            if yoga_class.start_time == teacher_yoga_class.start_time:
+                logger.info("yoga class on %s already exist", yoga_class.start_time)
+                return teacher_yoga_class.id
+        return self.insert(yoga_class.to_dict())
 
     def get_class_by_studio_id(self, studio_id: int) -> list[YogaClass]:
         query = """
@@ -314,17 +324,21 @@ class YogaClassBookingRepository(BaseRepository):
         student_id = booking.student_id
         yoga_class_id = booking.class_id
         query = """
-            UPDATE SET approve = t
+            UPDATE SET approve = 1
             WHERE class_id = "%s" AND student_id = "%s"
         """ %(yoga_class_id, student_id)
         cursor = self.db.execute_query(query)
         return cursor.lastrowid
 
-        
-    def get_all_unaproved_on_yoga_class_students(self, yoga_class_id):
-        return yoga_class_id
-        # TODO: select all unapprobed students on yoga class
-    
+    def get_all_unaproved_on_yoga_class_students(self, yoga_class_id: int):
+        """Get all unaproved on yoga class students"""
+        query = f"""
+            SELECT class_id, student_id, approved, canceled, cancel_date, canceled_by, notes, id
+            WHERE class_id = "{yoga_class_id}"
+        """
+        cursor = self.db.execute_query(query)
+        return [YogaClassBooking.from_dict(dict(row)) for row in cursor.fetchall()]
+
     def get_all_yoga_class_students(self, yoga_class_id) -> dict[int: int]:
         """
         Return: dict of {stufetn_id: booking_id}
@@ -374,6 +388,28 @@ def example_usage():
             registration_date=date.today()
         ))
 
+        yoga_class_repo = YogaClassRepository(db)
+        yoga_class_id = yoga_class_repo.add_yoga_class(YogaClass(
+            name = "KD yoga class",
+            studio_id = 1,
+            teacher_id = 1,
+            start_time = date(year=2025, month=12, day=12),
+            duration = 90,
+            capacity = 12
+        ))
+
+
+        yoga_class_booking_repo = YogaClassBookingRepository(db)
+        yoga_class_booking_id = yoga_class_booking_repo.add_booking(YogaClassBooking(
+            class_id = 1,
+            student_id = 1
+        ))
+        yoga_class_booking_repo.approve_student_to_class(YogaClassBooking(
+            class_id = 1,
+            student_id = 1
+        ))
+
+
         # Retrieve data
         active_teachers = teacher_repo.get_teachers_by_payment_status()
         anna_petrova = teacher_repo.get_teachers_by_username("anna_ballerina")
@@ -385,7 +421,8 @@ def example_usage():
         print(f"New students: {new_students}")
         if anna_petrova:
             print("Teacher by username:", anna_petrova.username)
-
+        print(f"Yoga class id: {yoga_class_id}")
+        print(f"Yoga class booking id: {yoga_class_booking_id}")
 
 if __name__ == "__main__":
     example_usage()
