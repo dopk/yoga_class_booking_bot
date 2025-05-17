@@ -3,7 +3,7 @@ version: '3.8'
 services:
   yoga-bot:
     build: .
-    env_file: ".env"
+    env_file: "./.env"
     volumes:
       - ./yoga.db:/app/yoga.db
     restart: unless-stopped

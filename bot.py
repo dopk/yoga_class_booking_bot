@@ -14,6 +14,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
     ContextTypes,
+    ConversationHandler
 )
 from models import *
 from config import BOT_TOKEN, ADMINS
@@ -21,6 +22,7 @@ from config import BOT_TOKEN, ADMINS
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+ENTER_STUDIO_NAME, ENTER_STUDIO_ADDRESS = range(2)
 
 # region Helpers
 async def get_user(update: Update) -> User:
@@ -45,8 +47,6 @@ def is_admin(user: User) -> bool:
 
 async def send_notification(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str):
     await context.bot.send_message(chat_id=user_id, text=text)
-
-
 # endregion
 
 # region Handlers
@@ -58,10 +58,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     buttons = [["📅 Расписание", "🎟 Мои записи"]]
-    if user.role == "teacher":
-        buttons.append(["🎓 Управление занятиями"])
     if is_admin(user):
         buttons.append(["👑 Админ-панель"])
+    if user.is_teacher:
+        buttons.append(["🏟️ Редактировать студии"])
+    if user.is_teacher:
+        buttons.append(["🎓 Управление занятиями"])
 
     reply_markup = ReplyKeyboardMarkup(buttons, resize_keyboard=True)
     await update.message.reply_text(text, reply_markup=reply_markup)
@@ -75,21 +77,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_schedule(update, context)
     elif text == "🎟 Мои записи":
         await show_my_bookings(update, context)
-    elif text == "🎓 Управление занятиями" and user.is_teacher:
-        await manage_classes(update, context)
     elif text == "👑 Админ-панель" and is_admin(user):
         await admin_panel(user, update, context)
-    elif text == "📅 Добавить учителя" and is_admin(user):
-        await select_and_add_teacher(update, context)
+    elif text == "🙋‍♀️ Добавить учителя" and is_admin(user):
+        await show_teacher_selection(update, context)
     elif text == "🎟 Вернуться в меню":
         await start(update, context)
     elif text == "🎓 Управление занятиями" and user.is_teacher:
-        await start(update, context) #TODO: dodelat'
+        await yoga_class_panel(user, update, context) # TODO: dodelat'
+    elif text == "🏟️ Редактировать студии" and user.is_teacher:
+        await studios_management_panel(user, update, context) # TODOL dodelat'
 
 
 async def admin_panel(user, update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_admin(user):
-        buttons = [["📅 Добавить учителя", "🎟 Вернуться в меню"]]
+        buttons = [["🙋‍♀️ Добавить учителя", "🎟 Вернуться в меню"]]
     else:
         await update.message.reply_text("❌ Доступ запрещен")
         return
@@ -98,30 +100,69 @@ async def admin_panel(user, update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, reply_markup=reply_markup)
 
 
-async def add_teacher(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def yoga_class_panel(user, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if user.is_teacher:
+        buttons = [["📅 Добавить занятие", "🎟 Вернуться в меню"]]
+    else:
+        await update.message.reply_text("❌ Доступ запрещен")
+        return
+    text = "Выберите действие из меню:"
+    reply_markup = ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+    await update.message.reply_text(text, reply_markup=reply_markup)
+
+
+async def studios_management_panel(user, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if user.is_teacher:
+        buttons = [["🏟️ Добавить студию", "🎟 Вернуться в меню"]]
+    else:
+        await update.message.reply_text("❌ Доступ запрещен")
+        return
+    text = "Выберите действие из меню:"
+    reply_markup = ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+    await update.message.reply_text(text, reply_markup=reply_markup)
+
+
+async def show_teacher_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     user = await get_user(update)
     if not is_admin(user):
         await update.message.reply_text("❌ Доступ запрещен")
         return
+    
+    page_size = 10
+    offset = page * page_size
 
-    args = context.args
-    if len(args) != 1:
-        await update.message.reply_text("Использование: /add_teacher <telegram_username>")
-        return
+    # Get users, not teachers:
+    non_teachers = list(User.select().where(User.is_teacher == False)
+                        .order_by(User.username)
+                        .offset(offset)
+                        .limit(page_size))
+    buttons = []
+    for user in non_teachers:
+        user_label = f"{user.display_name} (@{user.username})"
+        buttons.append([InlineKeyboardButton(user_label, callback_data=f'select_teacher_{user.telegram_id}')])
 
-    try:
-        try:
-            target_id = int(args[0])
-            target_user = User.get(User.telegram_id == target_id)
-        except ValueError:
-            await update.message.reply_text("❌ ID должен быть числом")
-        target_user.is_teacher = True
-        target_user.save()
-        await update.message.reply_text("✅ Пользователь назначен учителем")
-        await send_notification(context, target_user.telegram_id, "🎉 Вам назначены права учителя!")
-    except User.DoesNotExist:
-        await update.message.reply_text("❌ Пользователь не найден")
+    # Navigate buttons:
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f'teacher_page_{page-1}'))
+    if len(non_teachers) == page_size:
+        nav_buttons.append(InlineKeyboardButton("Вперед ➡️", callback_data=f'teacher_page_{page+1}'))
 
+    if nav_buttons:
+        buttons.append(nav_buttons)
+    replay_markup = InlineKeyboardMarkup(buttons)
+    if update.callback_query:
+        query = update.callback_query
+        await query.edit_message_text(
+            text="Выберите пользователя для назначения учителем:",
+            reply_markup=replay_markup
+        )
+    else:
+        await update.message.reply_text(
+            "Выберите пользователя для назначения учителем:",
+            reply_markup=replay_markup
+        )
+      
 
 async def create_class(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = await get_user(update)
@@ -129,8 +170,7 @@ async def create_class(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Доступно только учителям")
         return
 
-    # Здесь должна быть логика выбора студии, времени и т.д.
-    # с использованием ConversationHandler или FSM
+    # TODO: Здесь должна быть логика выбора студии, времени и т.д.
 
     # Пример создания класса
     try:
@@ -170,36 +210,109 @@ async def book_class(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    if '_' not in query.data:
-        logger.error(f"Invalid callback data: {query.data}")
-        return
-    action, _, booking_id = query.data.partition('_')
+    # 
+    data = query.data
 
     try:
-        booking = Booking.get_by_id(booking_id)
-    except DoesNotExist:
-        logger.error(f"Booking {booking_id} not found")
-    user = await get_user(update)
+        if data.startswith('confirm_') or data.startswith('reject_'):
+            action, _, booking_id = query.data.partition('_')
+            try: 
+                booking = Booking.get_by_id(booking_id)
+            except DoesNotExist:
+                logger.error(f"Booking {booking_id} not found")
+                return
+            user = await get_user(update)
+            if booking.yoga_class.teacher != user:
+                await query.answer("❌ Нет прав для этого действия")
+                return
 
-    if booking.yoga_class.teacher != user:
-        await query.answer("❌ Нет прав для этого действия")
-        return
+            if action == "confirm":
+                booking.status = 'confirmed'
+                text = "Бронь подтверждена"
+                notify_text = f"✅ Ваша бронь на {booking.yoga_class.start_time} подтверждена"
+            else:
+                booking.status = 'rejected'
+                text = "Бронь отклонена"
+                notify_text = f"❌ Ваша бронь на {booking.yoga_class.start_time} отклонена"
+            booking.save()
+            await query.answer(text)
+            await send_notification(context, booking.user.telegram_id, notify_text)
+        elif data.startswith('teacher_page_'):
+            page = int(data.split(' ')[2])
+            await show_teacher_selection(update, context, page)
 
-    if action == "confirm":
-        booking.status = 'confirmed'
-        text = "Бронь подтверждена"
-        notify_text = f"✅ Ваша бронь на {booking.yoga_class.start_time} подтверждена"
-    else:
-        booking.status = 'rejected'
-        text = "Бронь отклонена"
-        notify_text = f"❌ Ваша бронь на {booking.yoga_class.start_time} отклонена"
+        elif data.startswith('select_teacher_'):
+            telegram_id = int(data.split('_')[2])
+            print(telegram_id)
+            target_user = User.get(User.telegram_id == telegram_id)
+            if target_user.is_teacher:
+                await query.answer("⚠️ Этот пользователь уже учитель")
+                return
+            print(target_user.telegram_id)
+            target_user.is_teacher = 1
+            target_user.save()
 
-    booking.save()
-    await query.answer(text)
-    await send_notification(context, booking.user.telegram_id, notify_text)
-
+            await query.edit_message_text(
+                text=f"✅ Пользователь @{target_user.username} успешно назначен учителем!"
+            )
+            await send_notification(
+                context,
+                target_user.telegram_id,
+                "🎉 Вы были назначены учителем в системе!"
+            )
+    except User.DoesNotExist:
+        await query.answer("❌ Пользователь не найден")
+    except ValueError as e:
+        logger.error(f"Invalid data format: {e}")
+        await query.answer("⚠️ Ошибка формата данных")
+    except Exception as e:
+        logger.error(f"Error in callback handler: {e}")
+        await query.answer("⚠️ Произошла ошибка, попробуйте позже")
 
 # endregion
+
+
+# region Conversations
+async def start_adding_studio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = await get_user(update)
+    if not user.is_teacher:
+        await update.message.reply_text("❌ Доступно только учителям")
+        return ConversationHandler.END
+    await update.message.reply_text("Отправьте мне название студии")
+    return ENTER_STUDIO_NAME
+
+
+async def get_studio_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['studio_name'] = update.message.text
+    await update.message.reply_text("Отправьте мне адрес студии:")
+    return ENTER_STUDIO_ADDRESS
+
+
+async def get_studio_address(update: Update, context = ContextTypes.DEFAULT_TYPE):
+    user = await get_user(update)
+    name = context.user.data.get('studio_name')
+    address = update.message.text
+
+    if not name:
+        await update.message.reply_text("❌ Ошибка: название не получил")
+        return ConversationHandler.END
+    
+    try:
+        Studio.create(name=name, address=address)
+        await.update.message.reply_text(f"✅ Студия '{name}' успешно добавлена")
+    except IntegrityError:
+        await update.message.reply_text("❌ Студия с таким названием уже существует")
+    
+    context.user.data.clear()
+    return ConversationHandler.END
+
+
+async def cancel_adding_studio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ Добавление студии отменено")
+    context.user_data.clear()
+    return ConversationHandler.END
+# endregion
+
 
 def main():
     try:
@@ -208,9 +321,18 @@ def main():
 
         # Регистрация обработчиков
         application.add_handler(CommandHandler("start", start))
-        application.add_handler(CommandHandler("add_teacher", add_teacher))
         application.add_handler(MessageHandler(filters.TEXT, handle_message))
         application.add_handler(CallbackQueryHandler(handle_callback))
+        application.add_handler(ConversationHandler(
+            entry_points=[
+                MessageHandler(filters.Regex(r"^🏟️ Добавить студию$"), start_adding_studio)
+            ],
+            states={
+                ENTER_STUDIO_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_studio_name)],
+                ENTER_STUDIO_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_studio_address)]
+            },
+            fallbacks=[CommandHandler('cancel', cancel_adding_studio)],
+        ))
 
         application.run_polling()
     except Exception as e:
