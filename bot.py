@@ -1,5 +1,6 @@
 import logging
 from email.policy import default
+import re
 
 from telegram import (
     Update,
@@ -22,7 +23,12 @@ from config import BOT_TOKEN, ADMINS
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-ENTER_STUDIO_NAME, ENTER_STUDIO_ADDRESS = range(2)
+(
+    ENTER_STUDIO_NAME,
+    ENTER_STUDIO_ADDRESS,
+    ENTER_STUDIO_CAPACITY,
+    ENTER_STUDIO_HAS_SHOWER
+) = range(4)
 
 # region Helpers
 async def get_user(update: Update) -> User:
@@ -43,6 +49,16 @@ async def get_user(update: Update) -> User:
 
 def is_admin(user: User) -> bool:
     return user.telegram_id in ADMINS
+
+
+def check_yes(entered_str: str):
+    words = re.findall(r'\w+', str(entered_str).lower())
+    return any (word in {"да", "yes", "true", "1"} for word in words)
+
+
+def check_no(entered_str: str):
+    words = re.findall(r'\w+', str(entered_str).lower())
+    return any (word in {"нет", "no", "false", "0"} for word in words)
 
 
 async def send_notification(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str):
@@ -272,7 +288,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # endregion
 
 
-# region Conversations
+# region Conversations add studio
 async def start_adding_studio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = await get_user(update)
     if not user.is_teacher:
@@ -289,21 +305,50 @@ async def get_studio_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def get_studio_address(update: Update, context = ContextTypes.DEFAULT_TYPE):
+    context.user_data['studio_address'] = update.message.text
+    await update.message.reply_text("Отправьте мне сколько студия вмещает человек (максимум):")
+    return ENTER_STUDIO_CAPACITY
+
+
+async def get_studio_capacity(update: Update, context = ContextTypes.DEFAULT_TYPE):
+    context.user_data['capacity'] = update.message.text
+    await update.message.reply_text("В студии есть душ (да/нет)?:")
+    return ENTER_STUDIO_HAS_SHOWER
+
+
+async def get_studio_has_shower(update: Update, context = ContextTypes.DEFAULT_TYPE):
     user = await get_user(update)
-    name = context.user.data.get('studio_name')
-    address = update.message.text
+    name = context.user_data.get('studio_name')
+    address = context.user_data.get('studio_address')
+    capacity = context.user_data.get('capacity')
+    has_shower_str = update.message.text
 
     if not name:
-        await update.message.reply_text("❌ Ошибка: название не получил")
+        await update.message.reply_text("❌ Ошибка: название не получил. Добавление студии отменено")
         return ConversationHandler.END
-    
+    if not address:
+        await update.message.reply_text("❌ Ошибка: адрес не получил. Добавление студии отменено")
+        return ConversationHandler.END
     try:
-        Studio.create(name=name, address=address)
+        capacity = int(capacity)
+    except ValueError:
+        await update.message.reply_text("❌ Ошибка: Вместимость должна быть числом. Добавление студии отменено")
+        return ConversationHandler.END
+    if check_yes(has_shower_str):
+        has_shower = 1
+    elif check_no(has_shower_str):
+        has_shower = 0
+    else:
+        await update.message.reply_text("❌ Ошибка: Не смог понять есть ли в студии душ. Добавление студии отменено")
+
+    created_by = User.get(User.telegram_id == user.telegram_id).id
+    try:
+        Studio.create(name=name, address=address, capacity=capacity, has_shower=has_shower, created_by=created_by)
         await update.message.reply_text(f"✅ Студия '{name}' успешно добавлена")
     except IntegrityError:
-        await update.message.reply_text("❌ Студия с таким названием уже существует")
-    
-    context.user.data.clear()
+        await update.message.reply_text(f"❌ Не удалось создать студию, попробуйте ещё раз.")
+
+    context.user_data.clear()
     return ConversationHandler.END
 
 
@@ -314,6 +359,10 @@ async def cancel_adding_studio(update: Update, context: ContextTypes.DEFAULT_TYP
 # endregion
 
 
+# region Conversations add yoga_class
+#TODO: add yogaclass
+#endregion
+
 def main():
     try:
         initialize_db()
@@ -321,6 +370,18 @@ def main():
 
         # Регистрация обработчиков
         application.add_handler(CommandHandler("start", start))
+        application.add_handler(ConversationHandler(
+            entry_points=[
+                MessageHandler(filters.Regex(r"^🏟️ Добавить студию$"), start_adding_studio)
+            ],
+            states={
+                ENTER_STUDIO_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_studio_name)],
+                ENTER_STUDIO_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_studio_address)],
+                ENTER_STUDIO_CAPACITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_studio_capacity)],
+                ENTER_STUDIO_HAS_SHOWER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_studio_has_shower)]
+            },
+            fallbacks=[CommandHandler('cancel', cancel_adding_studio)],
+        ))
         application.add_handler(MessageHandler(filters.TEXT, handle_message))
         application.add_handler(CallbackQueryHandler(handle_callback))
         application.add_handler(ConversationHandler(
@@ -333,7 +394,6 @@ def main():
             },
             fallbacks=[CommandHandler('cancel', cancel_adding_studio)],
         ))
-
         application.run_polling()
     except Exception as e:
         logger.error('Fatal error: ', e)
