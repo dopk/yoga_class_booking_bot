@@ -299,7 +299,7 @@ async def get_studio_address(update: Update, context = ContextTypes.DEFAULT_TYPE
     
     try:
         Studio.create(name=name, address=address)
-        await.update.message.reply_text(f"✅ Студия '{name}' успешно добавлена")
+        await update.message.reply_text(f"✅ Студия '{name}' успешно добавлена")
     except IntegrityError:
         await update.message.reply_text("❌ Студия с таким названием уже существует")
     
