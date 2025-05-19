@@ -2,6 +2,8 @@ import logging
 from email.policy import default
 import re
 
+from apscheduler.schedulers.background import BackgroundScheduler
+from prometheus_client import start_http_server, Counter, Gauge, Histogram
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -34,6 +36,26 @@ logger = logging.getLogger(__name__)
     ENTER_CLASS_CAPACITY
 ) = range(8)
 
+
+# Инициализация метрик Prometheus (добавьте после импортов)
+commands_counter = Counter(
+    'bot_commands_total', 
+    'Total number of commands processed', 
+    ['command']
+)
+errors_counter = Counter('bot_errors_total', 'Total number of errors occurred')
+database_entities = Gauge(
+    'bot_database_entities',
+    'Number of entities in database',
+    ['entity']
+)
+request_duration = Histogram(
+    'bot_request_duration_seconds',
+    'Duration of bot requests',
+    ['command']
+)
+
+
 # region Helpers
 async def get_user(update: Update) -> User:
     if not update.effective_user:
@@ -64,13 +86,15 @@ def check_no(entered_str: str):
     words = re.findall(r'\w+', str(entered_str).lower())
     return any (word in {"нет", "no", "false", "0"} for word in words)
 
-
+@track_command('send_notification')
 async def send_notification(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str):
     await context.bot.send_message(chat_id=user_id, text=text)
 # endregion
 
 # region Handlers
+@track_command('start')
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    commands_counter.labels(command='start').inc()
     user = await get_user(update)
     text = (
         f"Привет, {user.display_name}!\n"
@@ -94,18 +118,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
     if text == "📅 Расписание":
+        commands_counter.labels(command='schedule').inc()
         await show_schedule(update, context)
     elif text == "🎟 Мои записи":
+        commands_counter.labels(command='my_bookings').inc()
         await show_my_bookings(update, context)
     elif text == "👑 Админ-панель" and is_admin(user):
+        commands_counter.labels(command='admin_panel').inc()
         await admin_panel(user, update, context)
     elif text == "🙋‍♀️ Добавить учителя" and is_admin(user):
+        commands_counter.labels(command='teacher_selection').inc()
         await show_teacher_selection(update, context)
     elif text == "🎟 Вернуться в меню":
         await start(update, context)
     elif text == "🎓 Управление занятиями" and user.is_teacher:
+        commands_counter.labels(command='yoga_class_panel').inc()
         await yoga_class_panel(user, update, context)
     elif text == "🏟️ Редактировать студии" and user.is_teacher:
+        commands_counter.labels(command='studios_management_panel').inc()
         await studios_management_panel(user, update, context)
 
 
@@ -120,6 +150,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try: 
                 booking = Booking.get_by_id(booking_id)
             except DoesNotExist:
+                errors_counter.inc()
                 logger.error("Booking %s not found", booking_id)
                 return
             user = await get_user(update)
@@ -161,11 +192,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "🎉 Вы были назначены учителем в системе!"
             )
     except User.DoesNotExist:
+        errors_counter.inc()
         await query.answer("❌ Пользователь не найден")
     except ValueError as e:
+        errors_counter.inc()
         logger.error("Invalid data format: %s", e)
         await query.answer("⚠️ Ошибка формата данных")
     except Exception as e:
+        errors_counter.inc()
         logger.error("Error in callback handler: %s", e)
         await query.answer("⚠️ Произошла ошибка, попробуйте позже")
 
@@ -182,7 +216,9 @@ async def handle_pagination(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await show_studio_page(update, context, current_page)
 # endregion
 
+
 # region panels
+@track_command('admin_panel')
 async def admin_panel(user, update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_admin(user):
         buttons = [["🙋‍♀️ Добавить учителя", "🎟 Вернуться в меню"]]
@@ -194,6 +230,7 @@ async def admin_panel(user, update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, reply_markup=reply_markup)
 
 
+@track_command('yoga_class_panel')
 async def yoga_class_panel(user, update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.is_teacher:
         buttons = [["📅 Добавить занятие", "🎟 Вернуться в меню"]]
@@ -205,6 +242,7 @@ async def yoga_class_panel(user, update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text(text, reply_markup=reply_markup)
 
 
+@track_command('studios_management_panel')
 async def studios_management_panel(user, update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.is_teacher:
         buttons = [["🏟️ Добавить студию", "🎟 Вернуться в меню"]]
@@ -216,6 +254,7 @@ async def studios_management_panel(user, update: Update, context: ContextTypes.D
     await update.message.reply_text(text, reply_markup=reply_markup)
 
 
+@track_command('show_teacher_selection')
 async def show_teacher_selection(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int = 0):
     user = await get_user(update)
     if not is_admin(user):
@@ -260,6 +299,7 @@ async def show_teacher_selection(update: Update, context: ContextTypes.DEFAULT_T
 
 
 # region Conversations add studio
+@track_command('start_adding_studio')
 async def start_adding_studio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = await get_user(update)
     if not user.is_teacher:
@@ -269,24 +309,28 @@ async def start_adding_studio(update: Update, context: ContextTypes.DEFAULT_TYPE
     return ENTER_STUDIO_NAME
 
 
+@track_command('get_studio_name')
 async def get_studio_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['studio_name'] = update.message.text
     await update.message.reply_text("Отправьте мне адрес студии:")
     return ENTER_STUDIO_ADDRESS
 
 
+@track_command('get_studio_address')
 async def get_studio_address(update: Update, context = ContextTypes.DEFAULT_TYPE):
     context.user_data['studio_address'] = update.message.text
     await update.message.reply_text("Отправьте мне сколько студия вмещает человек (максимум):")
     return ENTER_STUDIO_CAPACITY
 
 
+@track_command('get_studio_capacity')
 async def get_studio_capacity(update: Update, context = ContextTypes.DEFAULT_TYPE):
     context.user_data['capacity'] = update.message.text
     await update.message.reply_text("В студии есть душ (да/нет)?:")
     return ENTER_STUDIO_HAS_SHOWER
 
 
+@track_command('get_studio_has_shower')
 async def get_studio_has_shower(update: Update, context = ContextTypes.DEFAULT_TYPE):
     user = await get_user(update)
     name = context.user_data.get('studio_name')
@@ -304,6 +348,7 @@ async def get_studio_has_shower(update: Update, context = ContextTypes.DEFAULT_T
     try:
         capacity = int(capacity)
     except ValueError:
+        errors_counter.inc()
         await update.message.reply_text("❌ Ошибка: Вместимость должна быть числом. Добавление студии отменено")
         return ConversationHandler.END
     if check_yes(has_shower_str):
@@ -322,12 +367,14 @@ async def get_studio_has_shower(update: Update, context = ContextTypes.DEFAULT_T
             created_by=created_by)
         await update.message.reply_text(f"✅ Студия '{name}' успешно добавлена")
     except IntegrityError:
+        errors_counter.inc()
         await update.message.reply_text("❌ Не удалось создать студию, попробуйте ещё раз.")
 
     context.user_data.clear()
     return ConversationHandler.END
 
 
+@track_command('cancel_adding_studio')
 async def cancel_adding_studio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Добавление студии отменено")
     context.user_data.clear()
@@ -336,6 +383,7 @@ async def cancel_adding_studio(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 # region Conversations add yoga_class
+@track_command('start_creating_yoga_class')
 async def start_creating_yoga_class(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = await get_user(update)
     if not user.is_teacher:
@@ -355,6 +403,7 @@ async def start_creating_yoga_class(update: Update, context: ContextTypes.DEFAUL
     return await show_studio_page(update, context, 0)
 
 
+@track_command('show_studio_page')
 async def show_studio_page(update, context, page_number):
     pages = context.user_data['studio_pages']
     current_page = page_number
@@ -377,6 +426,7 @@ async def show_studio_page(update, context, page_number):
     return ENTER_CLASS_STUDIO
 
 
+@track_command('select_studio')
 async def select_studio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -386,6 +436,8 @@ async def select_studio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text("Отправьте мне дату и время начала занятия в формате: ДД.ММ.ГГГГ ЧЧ:ММ (например 22.11.2027 11:34):")
     return ENTER_CLASS_TIME
 
+
+@track_command('get_class_time')
 async def get_class_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         datetime_str = update.message.text
@@ -395,6 +447,7 @@ async def get_class_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Начало занятия не может быть в прошлом, введите дату будущего занятия (в формате: ДД.ММ.ГГГГ ЧЧ:ММ)")
             return ENTER_CLASS_TIME
     except ValueError:
+        errors_counter.inc()
         await update.message.reply_text("❌ Не смог распознать дату и время. Попробуйте ещё раз, я понимаю формат ДД.ММ.ГГГГ ЧЧ:ММ")
         return ENTER_CLASS_TIME
 
@@ -402,6 +455,7 @@ async def get_class_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ENTER_CLASS_DURATION
 
 
+@track_command('get_class_duration')
 async def get_class_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         duration = int(update.message.text)
@@ -409,6 +463,7 @@ async def get_class_duration(update: Update, context: ContextTypes.DEFAULT_TYPE)
             raise ValueError
         context.user_data['duration'] = duration
     except ValueError:
+        errors_counter.inc()
         await update.message.reply_text("❌ Не смог распознять продолжительнотсь занятия, отправьте, пожалуйста только число цифрами (а ешё мой программист решил, что занятие короче 15 минут не имеет смысла, а длиннее 240 никто не выдержит)")
         return ENTER_CLASS_DURATION
     studio_capacity = Studio.get_by_id(context.user_data['studio_id']).capacity
@@ -416,12 +471,14 @@ async def get_class_duration(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ENTER_CLASS_CAPACITY
 
 
+@track_command('get_class_capacity')
 async def get_class_capacity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         capacity = int(update.message.text)
         if capacity < 1:
             raise ValueError
     except ValueError:
+        errors_counter.inc()
         await update.message.reply_text("❌ Не смог распознать маскимальное количество участников, отправьте мне количество в виде числа, только цифры")
         return ENTER_CLASS_CAPACITY
 
@@ -446,12 +503,14 @@ async def get_class_capacity(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data.clear()
         return ConversationHandler.END
     except Exception as e:
+        errors_counter.inc()
         await update.message.reply_text("🚫 При создании урока что-то пошло не так, поробуйте снова")
         logger.error("Ошибка при создании урока %s", e)
         context.user_data.clear()
         return ConversationHandler.END
 
 
+@track_command('cancel_creating_yoga_class_callback')
 async def cancel_creating_yoga_class_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -460,8 +519,48 @@ async def cancel_creating_yoga_class_callback(update: Update, context: ContextTy
     return ConversationHandler.END
 #endregion
 
+
+# region monitorng
+@track_command('update_database_metrics')
+def update_database_metrics():
+    try:
+        database_entities.labels(entity='user').set(User.select().count())
+        database_entities.labels(entity='studio').set(Studio.select().count())
+        database_entities.labels(entity='yoga_class').set(YogaClass.select().count())
+        database_entities.labels(entity='booking').set(Booking.select().count())
+    except Exception as e:
+        errors_counter.inc()
+        logger.error(f"Error updating database metrics: {e}")
+
+
+def track_command(command_name):
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(update, context):
+            start_time = time()
+            try:
+                result = await func(update, context)
+                request_duration.labels(command=command_name).observe(time() - start_time)
+                return result
+            except Exception as e:
+                errors_counter.inc()
+                raise
+        return wrapper
+    return decorator
+# endregion
+
+
 def main():
     try:
+        # metric andpoint start
+        start_http_server(8000)
+        logger.info("Prometheus metrics server started on port 8000")
+
+        # scheduler init
+        scheduler = BackgroundScheduler()
+        scheduler.add_job(update_database_metrics, 'interval', minutes=5)
+        scheduler.start()
+
         initialize_db()
         application = Application.builder().token(BOT_TOKEN).build()
 
@@ -511,6 +610,7 @@ def main():
         ))
         application.run_polling()
     except Exception as e:
+        errors_counter.inc()
         logger.error('Fatal error: ', e)
 
 

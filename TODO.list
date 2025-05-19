@@ -1,8 +1,9 @@
-# TODO: edit and cancel to yoga class
-# TODO: unapprove student to class
-# TODO: edit and disable for Studios
 # TODO: monitoring
-# TODO: Cancel, or Move to main menu button everywhere
-# TODO: separate on modules, bot is too big
 # TODO: optimize code, remove duplications
-# TODO: 
+# TODO: separate on modules, bot is too big
+# TODO: def user actions (choise class)
+# TODO: def approve users to class
+# TODO: def edit and cancel to yoga class
+# TODO: def unapprove student to class
+# TODO: def edit and disable for Studios
+# TODO: Cancel, or Move to main menu button everywhere
