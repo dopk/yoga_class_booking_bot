@@ -1,5 +1,6 @@
 import logging
 from email.policy import default
+from functools import wraps
 import re
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 ) = range(8)
 
 
-# Инициализация метрик Prometheus (добавьте после импортов)
+# Инициализация метрик Prometheus
 commands_counter = Counter(
     'bot_commands_total', 
     'Total number of commands processed', 
@@ -54,6 +55,34 @@ request_duration = Histogram(
     'Duration of bot requests',
     ['command']
 )
+
+
+# region monitorng
+def track_command(command_name):
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(update, context):
+            start_time = time()
+            try:
+                result = await func(update, context)
+                request_duration.labels(command=command_name).observe(time() - start_time)
+                return result
+            except Exception as e:
+                errors_counter.inc()
+                raise
+        return wrapper
+    return decorator
+
+
+def update_database_metrics():
+    try:
+        database_entities.labels(entity='user').set(User.select().count())
+        database_entities.labels(entity='studio').set(Studio.select().count())
+        database_entities.labels(entity='yoga_class').set(YogaClass.select().count())
+        database_entities.labels(entity='booking').set(Booking.select().count())
+    except Exception as e:
+        logger.error("Error updating database metrics: %s", e)
+# endregion
 
 
 # region Helpers
@@ -520,36 +549,6 @@ async def cancel_creating_yoga_class_callback(update: Update, context: ContextTy
 #endregion
 
 
-# region monitorng
-@track_command('update_database_metrics')
-def update_database_metrics():
-    try:
-        database_entities.labels(entity='user').set(User.select().count())
-        database_entities.labels(entity='studio').set(Studio.select().count())
-        database_entities.labels(entity='yoga_class').set(YogaClass.select().count())
-        database_entities.labels(entity='booking').set(Booking.select().count())
-    except Exception as e:
-        errors_counter.inc()
-        logger.error(f"Error updating database metrics: {e}")
-
-
-def track_command(command_name):
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(update, context):
-            start_time = time()
-            try:
-                result = await func(update, context)
-                request_duration.labels(command=command_name).observe(time() - start_time)
-                return result
-            except Exception as e:
-                errors_counter.inc()
-                raise
-        return wrapper
-    return decorator
-# endregion
-
-
 def main():
     try:
         # metric andpoint start
@@ -558,7 +557,11 @@ def main():
 
         # scheduler init
         scheduler = BackgroundScheduler()
-        scheduler.add_job(update_database_metrics, 'interval', minutes=5)
+        scheduler.add_job(
+            func=update_database_metrics,
+             trigger='interval',
+             minutes=15,
+             max_instances=1)
         scheduler.start()
 
         initialize_db()
