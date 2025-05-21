@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, time
 from email.policy import default
 from functools import wraps
 import re
@@ -247,7 +248,6 @@ async def handle_pagination(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # region panels
-@track_command('admin_panel')
 async def admin_panel(user, update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_admin(user):
         buttons = [["🙋‍♀️ Добавить учителя", "🎟 Вернуться в меню"]]
@@ -259,7 +259,7 @@ async def admin_panel(user, update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, reply_markup=reply_markup)
 
 
-@track_command('yoga_class_panel')
+#@track_command('yoga_class_panel')
 async def yoga_class_panel(user, update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.is_teacher:
         buttons = [["📅 Добавить занятие", "🎟 Вернуться в меню"]]
@@ -271,7 +271,7 @@ async def yoga_class_panel(user, update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text(text, reply_markup=reply_markup)
 
 
-@track_command('studios_management_panel')
+#@track_command('studios_management_panel')
 async def studios_management_panel(user, update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.is_teacher:
         buttons = [["🏟️ Добавить студию", "🎟 Вернуться в меню"]]
