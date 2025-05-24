@@ -1,10 +1,9 @@
 import logging
-from datetime import datetime, time
-from functools import wraps
+from datetime import datetime
 import re
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from prometheus_client import start_http_server, Counter, Gauge, Histogram
+from prometheus_client import start_http_server
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -15,8 +14,9 @@ from telegram.ext import (
     ContextTypes,
     ConversationHandler
 )
-from models import *
 from config import BOT_TOKEN, ADMINS
+from monitoring import *
+from models import *
 
 # Настройка логирования
 logging.basicConfig(
@@ -37,54 +37,6 @@ logger = logging.getLogger(__name__)
     ENTER_CLASS_CAPACITY
 ) = range(8)
 
-# Инициализация метрик Prometheus
-commands_counter = Counter(
-    'bot_commands_total', 
-    'Total number of commands processed', 
-    ['command']
-)
-errors_counter = Counter('bot_errors_total', 'Total number of errors occurred')
-database_entities = Gauge(
-    'bot_database_entities',
-    'Number of entities in database',
-    ['entity']
-)
-request_duration = Histogram(
-    'bot_request_duration_seconds',
-    'Duration of bot requests',
-    ['command']
-)
-
-# ===================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====================
-
-def track_command(command_name):
-    """Decorator for get time duration of command."""
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(update, context):
-            start_time = time()
-            try:
-                result = await func(update, context)
-                request_duration.labels(command=command_name).observe(time() - start_time)
-                return result
-            except Exception as e:
-                errors_counter.inc()
-                logger.error(f"Error in {command_name}: {e}")
-                raise
-        return wrapper
-    return decorator
-
-def update_database_metrics():
-    """Update database metrics."""
-    try:
-        database_entities.labels(entity='user').set(User.select().count())
-        database_entities.labels(entity='studio').set(Studio.select().count())
-        database_entities.labels(entity='yoga_class').set(YogaClass.select().count())
-        database_entities.labels(entity='booking').set(Booking.select().count())
-    except Exception as e:
-        errors_counter.inc()
-        logger.error(f"Error updating database metrics: {e}")
-# endregion
 
 # region Helpers
 async def get_user(update: Update) -> User:
@@ -104,6 +56,12 @@ async def get_user(update: Update) -> User:
     if created:
         logger.info(f"New user registered: {user.id}")
     return db_user
+
+
+async def get_user_from_query(query) -> User:
+    """Получение пользователя из callback query."""
+    return await get_user(query.update)
+
 
 def is_admin(user: User) -> bool:
     """Ceck is user admin."""
@@ -125,6 +83,7 @@ async def send_notification(context: ContextTypes.DEFAULT_TYPE, user_id: int, te
 
 def create_reply_keyboard(buttons_list: list) -> ReplyKeyboardMarkup:
     """Create Reply Keybord from buttons list."""
+    logger.debug(f"Creating reply keyboard with buttons: {buttons_list}")
     return ReplyKeyboardMarkup(buttons_list, resize_keyboard=True)
 
 def create_inline_keyboard(buttons_list: list) -> InlineKeyboardMarkup:
@@ -133,31 +92,46 @@ def create_inline_keyboard(buttons_list: list) -> InlineKeyboardMarkup:
 # endregion
 
 # region Handlers
-
 @track_command('start')
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Command /start - main menu."""
-    commands_counter.labels(command='start').inc()
-    user = await get_user(update)
-    
-    # Формируем кнопки меню в зависимости от роли пользователя
-    buttons = [["📅 Расписание", "🎟 Мои записи"]]
-    
-    if is_admin(user):
-        buttons.append(["👑 Админ-панель"])
-    if user.is_teacher:
-        buttons.extend([
-            ["🏟️ Редактировать студии"],
-            ["🎓 Управление занятиями"]
-        ])
-    
-    text = f"Привет, {user.display_name}!\nВыберите действие из меню:"
-    await update.message.reply_text(text, reply_markup=create_reply_keyboard(buttons))
+    try:
+        """Command /start - main menu."""
+        commands_counter.labels(command='start').inc()
+        user = await get_user(update)
+
+        # Формируем кнопки меню в зависимости от роли пользователя
+        buttons = [["📅 Расписание", "🎟 Мои записи"]]
+
+        if is_admin(user):
+            buttons.append(["👑 Админ-панель"])
+        if user.is_teacher:
+            buttons.extend([
+                ["🏟️ Редактировать студии"],
+                ["🎓 Управление занятиями"]
+            ])
+        buttons.append(["🎟 Вернуться в меню"])
+
+        logger.debug(f"Creating menu for user {user.telegram_id} with buttons: {buttons}")
+
+        text = f"Привет, {user.display_name}!\nВыберите действие из меню:"
+        await update.message.reply_text(text, reply_markup=create_reply_keyboard(buttons))
+    except Exception as e:
+        errors_counter.inc()
+        logger.error(f"Error in handle_message: {e}")
+        await update.message.reply_text("⚠️ Произошла ошибка при обработке запроса")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Text message (menu buttons) handler."""
     user = await get_user(update)
+    if not update.message or not update.message.text:
+        await fallback_handler(update, context)
+        return
     text = update.message.text
+    logger.info(f"Received message: {text}")
+
+    if text == "🎟 Вернуться в меню":
+        await start(update, context)
+        return
     
     # Map button text to func
     handlers = {
@@ -165,7 +139,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎟 Мои записи": (show_my_bookings, 'my_bookings'),
         "👑 Админ-панель": (admin_panel, 'admin_panel'),
         "🙋‍♀️ Добавить учителя": (show_teacher_selection, 'teacher_selection'),
-        "🎟 Вернуться в меню": (start, None),
         "🎓 Управление занятиями": (yoga_class_panel, 'yoga_class_panel'),
         "🏟️ Редактировать студии": (studios_management_panel, 'studios_management_panel')
     }
@@ -186,13 +159,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if metric_name:
             commands_counter.labels(command=metric_name).inc()
         
-        await handler(user, update, context)
+        await handler(update, context)
     else:
         await update.message.reply_text("Я не понимаю эту команду. Используйте меню.")
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Callback handler for inline-buttons."""
     query = update.callback_query
+    logger.info(f"Received callback: {query.data}")
     await query.answer()
     
     try:
@@ -261,9 +235,33 @@ async def handle_teacher_selection(query, context, telegram_id):
         "🎉 Вы были назначены учителем в системе!"
     )
 
-# region panels
+async def handle_pagination(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Studio coise pagination."""
+    query = update.callback_query
+    await query.answer()
+    
+    current_page = context.user_data['current_page']
+    
+    if query.data == "studio_next_page":
+        current_page += 1
+    elif query.data == "studio_prev_page":
+        current_page -= 1
+    
+    context.user_data['current_page'] = current_page
+    return await show_studio_page(update, context, current_page)
 
-async def admin_panel(user, update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик для необработанных сообщений."""
+    logger.warning(f"Unhandled message: {update.message.text}")
+    await update.message.reply_text(
+        "Извините, я не понял ваш запрос. Пожалуйста, используйте кнопки меню.",
+        reply_markup=create_reply_keyboard([["🎟 Вернуться в меню"]])
+    )
+# endregion
+
+
+# region panels
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin panel."""
     buttons = [["🙋‍♀️ Добавить учителя", "🎟 Вернуться в меню"]]
     await update.message.reply_text(
@@ -271,7 +269,7 @@ async def admin_panel(user, update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=create_reply_keyboard(buttons)
     )
 
-async def yoga_class_panel(user, update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def yoga_class_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Yoga class management panel."""
     buttons = [["📅 Добавить занятие", "🎟 Вернуться в меню"]]
     await update.message.reply_text(
@@ -279,7 +277,7 @@ async def yoga_class_panel(user, update: Update, context: ContextTypes.DEFAULT_T
         reply_markup=create_reply_keyboard(buttons)
     )
 
-async def studios_management_panel(user, update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def studios_management_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Панель управления студиями."""
     buttons = [["🏟️ Добавить студию", "🎟 Вернуться в меню"]]
     await update.message.reply_text(
@@ -447,7 +445,7 @@ async def start_creating_yoga_class(update: Update, context: ContextTypes.DEFAUL
     
     return await show_studio_page(update, context, 0)
 
-@track_command('show_studio_page')
+
 async def show_studio_page(update, context, page_number):
     """Show studios page."""
     pages = context.user_data['studio_pages']
@@ -573,11 +571,72 @@ async def cancel_creating_yoga_class(update: Update, context: ContextTypes.DEFAU
 # endregion
 
 
+@track_command('show_schedule')
+async def show_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показ расписания занятий."""
+    try:
+        # Получаем будущие занятия
+        classes = YogaClass.select().where(
+            YogaClass.start_time > datetime.now()
+        ).order_by(YogaClass.start_time)
+        
+        if not classes:
+            await update.message.reply_text("На данный момент нет запланированных занятий.")
+            return
+        
+        text = "📅 Расписание занятий:\n\n"
+        for class_ in classes:
+            text += (
+                f"🏷 {class_.name}\n"
+                f"⏰ {class_.start_time.strftime('%d.%m.%Y %H:%M')}\n"
+                f"🏟 {class_.studio.name}\n"
+                f"👨‍🏫 Преподаватель: {class_.teacher.display_name}\n"
+                f"🔢 Мест: {Booking.select().where(Booking.yoga_class == class_, Booking.status == 'confirmed').count()}/{class_.capacity}\n\n"
+            )
+        
+        await update.message.reply_text(text)
+    except Exception as e:
+        logger.error(f"Error showing schedule: {e}")
+        await update.message.reply_text("❌ Произошла ошибка при загрузке расписания.")
+
+@track_command('show_my_bookings')
+async def show_my_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показ броней пользователя."""
+    try:
+        user = await get_user(update)
+        bookings = Booking.select().where(
+            Booking.user == user,
+            Booking.yoga_class.start_time > datetime.now()
+        ).order_by(Booking.yoga_class.start_time)
+        
+        if not bookings:
+            await update.message.reply_text("У вас нет активных броней.")
+            return
+        
+        text = "🎟 Ваши брони:\n\n"
+        for booking in bookings:
+            status_emoji = "🟢" if booking.status == 'confirmed' else "🟡" if booking.status == 'pending' else "🔴"
+            text += (
+                f"{status_emoji} {booking.yoga_class.name}\n"
+                f"⏰ {booking.yoga_class.start_time.strftime('%d.%m.%Y %H:%M')}\n"
+                f"🏟 {booking.yoga_class.studio.name}\n"
+                f"Статус: {booking.status}\n\n"
+            )
+        
+        await update.message.reply_text(text)
+    except Exception as e:
+        logger.error(f"Error showing bookings: {e}")
+        await update.message.reply_text("❌ Произошла ошибка при загрузке ваших броней.")
+
+
 # bot start
 def setup_handlers(application):
     """Настройка обработчиков команд и сообщений."""
     # Обработчик команды /start
+    logger.info("Setting up handlers...")
     application.add_handler(CommandHandler("start", start))
+    logger.info("Added start handler")
+
     
     # Обработчики для добавления студии
     studio_conversation = ConversationHandler(
@@ -641,6 +700,7 @@ def main():
         application = Application.builder().token(BOT_TOKEN).build()
         setup_handlers(application)
         
+        logger.info("Bot started successfully")
         # Запуск бота
         application.run_polling()
         
@@ -648,6 +708,10 @@ def main():
         errors_counter.inc()
         logger.error(f"Fatal error: {e}")
         raise
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик ошибок."""
+    logger.error(f"Update {update} caused error {context.error}")
 
 if __name__ == "__main__":
     main()
