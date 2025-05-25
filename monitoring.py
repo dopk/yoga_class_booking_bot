@@ -4,7 +4,7 @@ from time import time
 
 from prometheus_client import Counter, Gauge, Histogram
 
-from models import User, Studio, YogaClass, Booking
+from core.models import User, Studio, YogaClass, Booking
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", 

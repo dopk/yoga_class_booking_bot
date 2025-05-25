@@ -16,7 +16,7 @@ from telegram.ext import (
 )
 from config import BOT_TOKEN, ADMINS
 from monitoring import *
-from models import *
+from core.models import *
 
 # Настройка логирования
 logging.basicConfig(
