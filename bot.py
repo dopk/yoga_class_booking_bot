@@ -17,10 +17,11 @@ from telegram.ext import (
 from config import BOT_TOKEN, ADMINS
 from monitoring import *
 from core.models import *
+from services import *
 
 # Настройка логирования
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", 
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
@@ -43,18 +44,15 @@ async def get_user(update: Update) -> User:
     """Get or create user in database."""
     if not update.effective_user:
         raise ValueError("Effective user not found")
-    
+
     user = update.effective_user
-    db_user, created = User.get_or_create(
-        telegram_id=user.id,
-        defaults={
-            'display_name': user.full_name or '',
-            'username': user.username or ''
-        }
-    )
-    
+    db_user, created = UserService.get_or_create(
+        messenger_id=user.id,
+        display_name=user.full_name,
+        username=user.username)
+
     if created:
-        logger.info(f"New user registered: {user.id}")
+        logger.info("New user registered: %s", user.id)
     return db_user
 
 
@@ -65,7 +63,7 @@ async def get_user_from_query(query) -> User:
 
 def is_admin(user: User) -> bool:
     """Ceck is user admin."""
-    return user.telegram_id in ADMINS
+    return user.messenger_id in ADMINS
 
 def check_yes(entered_str: str) -> bool:
     """Check string contains yes"""
@@ -83,7 +81,7 @@ async def send_notification(context: ContextTypes.DEFAULT_TYPE, user_id: int, te
 
 def create_reply_keyboard(buttons_list: list) -> ReplyKeyboardMarkup:
     """Create Reply Keybord from buttons list."""
-    logger.debug(f"Creating reply keyboard with buttons: {buttons_list}")
+    logger.debug("Creating reply keyboard with buttons: %s", buttons_list)
     return ReplyKeyboardMarkup(buttons_list, resize_keyboard=True)
 
 def create_inline_keyboard(buttons_list: list) -> InlineKeyboardMarkup:
@@ -94,8 +92,8 @@ def create_inline_keyboard(buttons_list: list) -> InlineKeyboardMarkup:
 # region Handlers
 @track_command('start')
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Command /start - main menu."""
     try:
-        """Command /start - main menu."""
         commands_counter.labels(command='start').inc()
         user = await get_user(update)
 
@@ -111,7 +109,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
         buttons.append(["🎟 Вернуться в меню"])
 
-        logger.debug(f"Creating menu for user {user.telegram_id} with buttons: {buttons}")
+        logger.debug(f"Creating menu for user {user.messenger_id} with buttons: {buttons}")
 
         text = f"Привет, {user.display_name}!\nВыберите действие из меню:"
         await update.message.reply_text(text, reply_markup=create_reply_keyboard(buttons))
@@ -132,7 +130,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "🎟 Вернуться в меню":
         await start(update, context)
         return
-    
+
     # Map button text to func
     handlers = {
         "📅 Расписание": (show_schedule, 'schedule'),
@@ -142,23 +140,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎓 Управление занятиями": (yoga_class_panel, 'yoga_class_panel'),
         "🏟️ Редактировать студии": (studios_management_panel, 'studios_management_panel')
     }
-    
+
     if text in handlers:
         handler, metric_name = handlers[text]
-        
+
         # Проверка прав для административных функций
         if text in ["👑 Админ-панель", "🙋‍♀️ Добавить учителя"] and not is_admin(user):
             await update.message.reply_text("❌ Доступ запрещен")
             return
-        
+
         # Проверка прав для функций преподавателя
         if text in ["🎓 Управление занятиями", "🏟️ Редактировать студии"] and not user.is_teacher:
             await update.message.reply_text("❌ Доступ запрещен")
             return
-        
+
         if metric_name:
             commands_counter.labels(command=metric_name).inc()
-        
+
         await handler(update, context)
     else:
         await update.message.reply_text("Я не понимаю эту команду. Используйте меню.")
@@ -168,19 +166,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     logger.info(f"Received callback: {query.data}")
     await query.answer()
-    
+
     try:
         if query.data.startswith(('confirm_', 'reject_')):
             await handle_booking_decision(query, context)
-        
+
         elif query.data.startswith('teacher_page_'):
             page = int(query.data.split('_')[2])
             await show_teacher_selection(update, context, page)
-        
+
         elif query.data.startswith('select_teacher_'):
-            telegram_id = int(query.data.split('_')[2])
-            await handle_teacher_selection(query, context, telegram_id)
-    
+            messenger_id = int(query.data.split('_')[2])
+            await handle_teacher_selection(query, context, messenger_id)
+
     except Exception as e:
         errors_counter.inc()
         logger.error(f"Error in callback handler: {e}")
@@ -189,15 +187,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_booking_decision(query, context):
     """Handler for bookin decision."""
     action, _, booking_id = query.data.partition('_')
-    
+
     try:
         booking = Booking.get_by_id(booking_id)
         user = await get_user_from_query(query)
-        
+
         if booking.yoga_class.teacher != user:
             await query.answer("❌ Нет прав для этого действия")
             return
-        
+
         if action == "confirm":
             booking.status = 'confirmed'
             text = "Бронь подтверждена"
@@ -206,32 +204,32 @@ async def handle_booking_decision(query, context):
             booking.status = 'rejected'
             text = "Бронь отклонена"
             notify_text = f"❌ Ваша бронь на {booking.yoga_class.start_time} отклонена"
-        
+
         booking.save()
         await query.answer(text)
-        await send_notification(context, booking.user.telegram_id, notify_text)
-    
+        await send_notification(context, booking.user.messenger_id, notify_text)
+
     except DoesNotExist:
         errors_counter.inc()
         logger.error(f"Booking {booking_id} not found")
 
-async def handle_teacher_selection(query, context, telegram_id):
+async def handle_teacher_selection(query, context, messenger_id):
     """Обработка выбора пользователя в качестве учителя."""
-    target_user = User.get(User.telegram_id == telegram_id)
-    
+    target_user = User.get(User.messenger_id == messenger_id)
+
     if target_user.is_teacher:
         await query.answer("⚠️ Этот пользователь уже учитель")
         return
-    
+
     target_user.is_teacher = True
     target_user.save()
-    
+
     await query.edit_message_text(
         text=f"✅ Пользователь @{target_user.username} успешно назначен учителем!"
     )
     await send_notification(
         context,
-        target_user.telegram_id,
+        target_user.messenger_id,
         "🎉 Вы были назначены учителем в системе!"
     )
 
@@ -239,14 +237,14 @@ async def handle_pagination(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Studio coise pagination."""
     query = update.callback_query
     await query.answer()
-    
+
     current_page = context.user_data['current_page']
-    
+
     if query.data == "studio_next_page":
         current_page += 1
     elif query.data == "studio_prev_page":
         current_page -= 1
-    
+
     context.user_data['current_page'] = current_page
     return await show_studio_page(update, context, current_page)
 
@@ -297,28 +295,28 @@ async def show_teacher_selection(update: Update, context: ContextTypes.DEFAULT_T
     non_teachers = list(User.select().where(User.is_teacher == False)
                         .order_by(User.username)
                         .paginate(page, page_size))
-    
+
     # Create buttons with users
     buttons = [
         [InlineKeyboardButton(
-            f"{user.display_name} (@{user.username})", 
-            callback_data=f'select_teacher_{user.telegram_id}'
-        )] 
+            f"{user.display_name} (@{user.username})",
+            callback_data=f'select_teacher_{user.messenger_id}'
+        )]
         for user in non_teachers
     ]
-    
+
     # Navigate buttons:
     nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data=f'teacher_page_{page-1}'))
     if len(non_teachers) == page_size:
         nav_buttons.append(InlineKeyboardButton("Вперед ➡️", callback_data=f'teacher_page_{page+1}'))
-    
+
     if nav_buttons:
         buttons.append(nav_buttons)
-    
+
     reply_markup = create_inline_keyboard(buttons)
-    
+
     if update.callback_query:
         await update.callback_query.edit_message_text(
             text="Выберите пользователя для назначения учителем:",
@@ -340,7 +338,7 @@ async def start_adding_studio(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not user.is_teacher:
         await update.message.reply_text("❌ Доступно только учителям")
         return ConversationHandler.END
-    
+
     await update.message.reply_text("Отправьте мне название студии")
     return ENTER_STUDIO_NAME
 
@@ -380,7 +378,7 @@ async def get_studio_has_shower(update: Update, context: ContextTypes.DEFAULT_TY
     address = context.user_data.get('studio_address')
     capacity = context.user_data.get('capacity')
     has_shower_str = update.message.text
-    created_by = User.get(User.telegram_id == user.telegram_id).id
+    created_by = User.get(User.messenger_id == user.messenger_id).id
 
     if not name:
         await update.message.reply_text("❌ Ошибка: название не получил. Добавление студии отменено")
@@ -439,10 +437,10 @@ async def start_creating_yoga_class(update: Update, context: ContextTypes.DEFAUL
     if not studios:
         await update.message.reply_text("❌ Нет доступных студий. Сначала создайте студию")
         return ConversationHandler.END
-    
+
     context.user_data['studio_pages'] = [studios[i:i+10] for i in range(0, len(studios), 10)]
     context.user_data['current_page'] = 0
-    
+
     return await show_studio_page(update, context, 0)
 
 
@@ -459,20 +457,20 @@ async def show_studio_page(update, context, page_number):
         nav_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data="studio_prev_page"))
     if page_number < len(pages) - 1:
         nav_buttons.append(InlineKeyboardButton("Вперед ➡️", callback_data="studio_next_page"))
-    
+
     if nav_buttons:
         buttons.append(nav_buttons)
-    
+
     reply_markup = create_inline_keyboard(buttons)
-    
+
     if update.callback_query:
         await update.callback_query.edit_message_text(
-            "Выберите студию:", 
+            "Выберите студию:",
             reply_markup=reply_markup
         )
     else:
         await update.message.reply_text(
-            "Выберите студию:", 
+            "Выберите студию:",
             reply_markup=reply_markup
         )
     return ENTER_CLASS_STUDIO
@@ -482,10 +480,10 @@ async def select_studio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Studio selection."""
     query = update.callback_query
     await query.answer()
-    
+
     studio_id = int(query.data.split("_")[2])
     context.user_data['studio_id'] = studio_id
-    
+
     await query.edit_message_text(
         "Отправьте дату и время начала занятия в формате: ДД.ММ.ГГГГ ЧЧ:ММ (например 22.11.2027 11:34):"
     )
@@ -496,15 +494,15 @@ async def get_class_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Получение времени начала занятия."""
     try:
         start_time = datetime.strptime(update.message.text, "%d.%m.%Y %H:%M")
-        
+
         if start_time < datetime.now():
             await update.message.reply_text("❌ Начало занятия не может быть в прошлом. Введите будущую дату.")
             return ENTER_CLASS_TIME
-            
+
         context.user_data['start_time'] = start_time
         await update.message.reply_text("Отправьте мне продолжительность занятия в минутах:")
         return ENTER_CLASS_DURATION
-    
+
     except ValueError:
         errors_counter.inc()
         await update.message.reply_text("❌ Не смог распознать дату и время. Попробуйте ещё раз, я понимаю формат ДД.ММ.ГГГГ ЧЧ:ММ")
@@ -515,19 +513,19 @@ async def get_class_duration(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Get class duration."""
     try:
         duration = int(update.message.text)
-        
+
         if duration < 15 or duration > 240:
             await update.message.reply_text("❌ е смог распознять продолжительнотсь занятия, отправьте, пожалуйста только число цифрами (а ешё мой программист решил, что занятие короче 15 минут не имеет смысла, а длиннее 240 никто не выдержит).")
             return ENTER_CLASS_DURATION
-            
+
         context.user_data['duration'] = duration
-        
+
         studio = Studio.get_by_id(context.user_data['studio_id'])
         await update.message.reply_text(
             f"Отправьте максимальное количество участников. Вместимость зала: {studio.capacity}"
         )
         return ENTER_CLASS_CAPACITY
-    
+
     except ValueError:
         await update.message.reply_text("❌ Не смог распознять продолжительнотсь занятия, отправьте, пожалуйста только число цифрами (в минутах).")
         return ENTER_CLASS_DURATION
@@ -539,7 +537,7 @@ async def get_class_capacity(update: Update, context: ContextTypes.DEFAULT_TYPE)
         capacity = int(update.message.text)
         if capacity < 1:
             raise ValueError
-        
+
         user = await get_user(update)
         yoga_class = YogaClass.create(
             name="Занятие",  # TODO: enter class name
@@ -549,10 +547,10 @@ async def get_class_capacity(update: Update, context: ContextTypes.DEFAULT_TYPE)
             duration=context.user_data['duration'],
             capacity=capacity
         )
-        
+
         await update.message.reply_text(f"✅ Занятие на {yoga_class.start_time} успешно создано!")
         return ConversationHandler.END
-    
+
     except ValueError:
         await update.message.reply_text("❌ Количество участников должно быть положительным числом. Отправьте снова.")
         return ENTER_CLASS_CAPACITY
@@ -579,11 +577,11 @@ async def show_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         classes = YogaClass.select().where(
             YogaClass.start_time > datetime.now()
         ).order_by(YogaClass.start_time)
-        
+
         if not classes:
             await update.message.reply_text("На данный момент нет запланированных занятий.")
             return
-        
+
         text = "📅 Расписание занятий:\n\n"
         for class_ in classes:
             text += (
@@ -593,7 +591,7 @@ async def show_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"👨‍🏫 Преподаватель: {class_.teacher.display_name}\n"
                 f"🔢 Мест: {Booking.select().where(Booking.yoga_class == class_, Booking.status == 'confirmed').count()}/{class_.capacity}\n\n"
             )
-        
+
         await update.message.reply_text(text)
     except Exception as e:
         logger.error(f"Error showing schedule: {e}")
@@ -608,11 +606,11 @@ async def show_my_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
             Booking.user == user,
             Booking.yoga_class.start_time > datetime.now()
         ).order_by(Booking.yoga_class.start_time)
-        
+
         if not bookings:
             await update.message.reply_text("У вас нет активных броней.")
             return
-        
+
         text = "🎟 Ваши брони:\n\n"
         for booking in bookings:
             status_emoji = "🟢" if booking.status == 'confirmed' else "🟡" if booking.status == 'pending' else "🔴"
@@ -622,7 +620,7 @@ async def show_my_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🏟 {booking.yoga_class.studio.name}\n"
                 f"Статус: {booking.status}\n\n"
             )
-        
+
         await update.message.reply_text(text)
     except Exception as e:
         logger.error(f"Error showing bookings: {e}")
@@ -637,7 +635,7 @@ def setup_handlers(application):
     application.add_handler(CommandHandler("start", start))
     logger.info("Added start handler")
 
-    
+
     # Обработчики для добавления студии
     studio_conversation = ConversationHandler(
         entry_points=[
@@ -652,7 +650,7 @@ def setup_handlers(application):
         fallbacks=[CommandHandler('cancel', cancel_adding_studio)],
         conversation_timeout=1200
     )
-    
+
     # Обработчики для создания занятия
     class_conversation = ConversationHandler(
         entry_points=[
@@ -670,7 +668,7 @@ def setup_handlers(application):
         fallbacks=[CommandHandler('cancel', cancel_creating_yoga_class)],
         conversation_timeout=1200
     )
-    
+
     # Основные обработчики сообщений и callback-запросов
     application.add_handler(studio_conversation)
     application.add_handler(class_conversation)
@@ -683,7 +681,7 @@ def main():
         # Инициализация метрик Prometheus
         start_http_server(8000)
         logger.info("Prometheus metrics server started on port 8000")
-        
+
         # Инициализация планировщика задач
         scheduler = BackgroundScheduler()
         scheduler.add_job(
@@ -692,18 +690,18 @@ def main():
             minutes=15
         )
         scheduler.start()
-        
+
         # Инициализация базы данных
         initialize_db()
-        
+
         # Создание и настройка приложения бота
         application = Application.builder().token(BOT_TOKEN).build()
         setup_handlers(application)
-        
+
         logger.info("Bot started successfully")
         # Запуск бота
         application.run_polling()
-        
+
     except Exception as e:
         errors_counter.inc()
         logger.error(f"Fatal error: {e}")

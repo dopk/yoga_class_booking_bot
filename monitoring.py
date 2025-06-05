@@ -7,15 +7,15 @@ from prometheus_client import Counter, Gauge, Histogram
 from core.models import User, Studio, YogaClass, Booking
 
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", 
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
 
 commands_counter = Counter(
-    'bot_commands_total', 
-    'Total number of commands processed', 
+    'bot_commands_total',
+    'Total number of commands processed',
     ['command']
 )
 errors_counter = Counter('bot_errors_total', 'Total number of errors occurred')

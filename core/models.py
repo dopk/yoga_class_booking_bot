@@ -12,7 +12,7 @@ class BaseModel(Model):
         database = db
 
 class User(BaseModel):
-    telegram_id = IntegerField(unique=True)
+    messenger_id = IntegerField(unique=True)
     username = CharField(null=True)
     display_name = CharField(null=True)
     is_teacher = BooleanField(default=False)
@@ -21,7 +21,7 @@ class User(BaseModel):
 
     @property
     def role(self):
-        if self.telegram_id in ADMINS:
+        if self.messenger_id in ADMINS:
             return "admin"
         return "teacher" if self.is_teacher else "student"
 
