@@ -214,24 +214,25 @@ async def handle_booking_decision(query, context):
         logger.error(f"Booking {booking_id} not found")
 
 async def handle_teacher_selection(query, context, messenger_id):
-    """Обработка выбора пользователя в качестве учителя."""
-    target_user = User.get(User.messenger_id == messenger_id)
-
-    if target_user.is_teacher:
-        await query.answer("⚠️ Этот пользователь уже учитель")
-        return
-
-    target_user.is_teacher = True
-    target_user.save()
-
-    await query.edit_message_text(
-        text=f"✅ Пользователь @{target_user.username} успешно назначен учителем!"
-    )
-    await send_notification(
-        context,
-        target_user.messenger_id,
-        "🎉 Вы были назначены учителем в системе!"
-    )
+    """Обработка выбора пользователя в качестве учителя."""   
+    target_user, is_maked_teacher = UserService.make_teacher(messenger_id=messenger_id)
+    if target_user:
+        if is_maked_teacher:
+            await query.edit_message_text(
+                text=f"✅ Пользователь @{target_user.username} успешно назначен учителем!"
+            )
+            await send_notification(
+                context,
+                messenger_id,
+                "🎉 Вы были назначены учителем в системе!"
+            )
+        else:
+            await query.answer("⚠️ Этот пользователь уже учитель")
+    else:
+        await query.edit_message_text(
+                text="❌ Что-то пошло не так, попробуйте снова позднее."
+            )
+    
 
 async def handle_pagination(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Studio coise pagination."""
@@ -399,15 +400,15 @@ async def get_studio_has_shower(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         await update.message.reply_text("❌ Ошибка: Не смог понять есть ли в студии душ. Добавление студии отменено")
 
-    try:
-        Studio.create(
-            name=name,
-            address=address,
-            capacity=capacity,
-            has_shower=has_shower,
-            created_by=created_by)
+    studio = StudioService.create_studio(
+        name=name,
+        address=address,
+        capacity=capacity,
+        has_shower=has_shower,
+        created_by=created_by)
+    if studio:
         await update.message.reply_text(f"✅ Студия '{name}' успешно добавлена")
-    except IntegrityError:
+    else:
         errors_counter.inc()
         await update.message.reply_text("❌ Не удалось создать студию, попробуйте ещё раз.")
 
