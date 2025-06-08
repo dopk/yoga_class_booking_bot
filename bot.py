@@ -523,7 +523,7 @@ async def get_class_duration(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         context.user_data['duration'] = duration
 
-        studio = StudioService.get_by_id(context.user_data['studio_id'])
+        studio = StudioService.get_studio_by_id(context.user_data['studio_id'])
         await update.message.reply_text(
             f"Отправьте максимальное количество участников. Вместимость зала: {studio.capacity}"
         )
@@ -540,6 +540,7 @@ async def get_class_capacity(update: Update, context: ContextTypes.DEFAULT_TYPE)
         capacity = int(update.message.text)
         if capacity < 1:
             raise ValueError
+        context.user_data['capacity'] = capacity
     except ValueError:
         await update.message.reply_text("❌ Количество участников должно быть положительным числом. Отправьте снова.")
         return ENTER_CLASS_CAPACITY
@@ -558,18 +559,18 @@ async def get_class_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = await get_user(update)
         yoga_class = YogaClassService.create_yoga_class(
             name=name,
-            studio=context.user_data['studio_id'],
-            teacher=user.id,
+            studio_id=context.user_data['studio_id'],
+            teacher_id=user.id,
             start_time=context.user_data['start_time'],
             duration=context.user_data['duration'],
-            capacity=capacity
+            capacity=context.user_data['capacity']
         )
         await update.message.reply_text(f"✅ Занятие на {yoga_class.start_time} успешно создано!")
         return ConversationHandler.END
     except Exception as e:
+        logger.error("something went wrong with creating YogaClass: %s", e)
+        await update.message.reply_text("❌ Что-то пошло не так, попробуйте снова с начала.")
         return ConversationHandler.END
-     
-
 
 
 @track_command('cancel_creating_yoga_class')
