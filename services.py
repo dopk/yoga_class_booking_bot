@@ -1,3 +1,4 @@
+from datetime import datetime
 import logging
 from core.models import User, Studio, YogaClass, Booking
 from peewee import DoesNotExist
@@ -50,7 +51,31 @@ class StudioService:
             )
         except IntegrityError:
             return None
+    
+    @staticmethod
+    def get_studios():
+        return list(Studio.select().order_by(Studio.created_at))
+    
+    @staticmethod
+    def get_studio_by_id(id:int):
+        return Studio.get_by_id(id)
 
+
+class YogaClassService:
+    @staticmethod
+    def create_yoga_class(name: str,
+                          studio_id: int,
+                          teacher_id: int,
+                          start_time: datetime,
+                          duration: int,
+                          capacity: int):
+        return YogaClass.create(
+            name=name,
+            studio=studio_id,
+            teacher=teacher_id,
+            start_time=start_time,
+            duration=duration,
+            capacity=capacity)        
 
 def main():
     pass

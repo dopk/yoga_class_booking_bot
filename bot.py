@@ -1,5 +1,5 @@
-import logging
 from datetime import datetime
+import logging
 import re
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -35,7 +35,8 @@ logger = logging.getLogger(__name__)
     ENTER_CLASS_STUDIO,
     ENTER_CLASS_TIME,
     ENTER_CLASS_DURATION,
-    ENTER_CLASS_CAPACITY
+    ENTER_CLASS_CAPACITY,
+    ENTER_CLASS_NAME
 ) = range(8)
 
 
@@ -430,11 +431,12 @@ async def cancel_adding_studio(update: Update, context: ContextTypes.DEFAULT_TYP
 async def start_creating_yoga_class(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start of creating studio."""
     user = await get_user(update)
+
     if not user.is_teacher:
         await update.message.reply_text("❌ Доступно только учителям")
         return ConversationHandler.END
 
-    studios = list(Studio.select().order_by(Studio.created_at))
+    studios = StudioService.get_studios()
     if not studios:
         await update.message.reply_text("❌ Нет доступных студий. Сначала создайте студию")
         return ConversationHandler.END
@@ -515,13 +517,13 @@ async def get_class_duration(update: Update, context: ContextTypes.DEFAULT_TYPE)
     try:
         duration = int(update.message.text)
 
-        if duration < 15 or duration > 240:
-            await update.message.reply_text("❌ е смог распознять продолжительнотсь занятия, отправьте, пожалуйста только число цифрами (а ешё мой программист решил, что занятие короче 15 минут не имеет смысла, а длиннее 240 никто не выдержит).")
+        if duration < 15 or duration > 720:
+            await update.message.reply_text("❌ е смог распознять продолжительнотсь занятия, отправьте, пожалуйста только число цифрами (а ешё мой программист решил, что занятие короче 15 минут не имеет смысла, а длиннее 720 никто не выдержит).")
             return ENTER_CLASS_DURATION
 
         context.user_data['duration'] = duration
 
-        studio = Studio.get_by_id(context.user_data['studio_id'])
+        studio = StudioService.get_by_id(context.user_data['studio_id'])
         await update.message.reply_text(
             f"Отправьте максимальное количество участников. Вместимость зала: {studio.capacity}"
         )
@@ -538,20 +540,6 @@ async def get_class_capacity(update: Update, context: ContextTypes.DEFAULT_TYPE)
         capacity = int(update.message.text)
         if capacity < 1:
             raise ValueError
-
-        user = await get_user(update)
-        yoga_class = YogaClass.create(
-            name="Занятие",  # TODO: enter class name
-            studio=context.user_data['studio_id'],
-            teacher=user.id,
-            start_time=context.user_data['start_time'],
-            duration=context.user_data['duration'],
-            capacity=capacity
-        )
-
-        await update.message.reply_text(f"✅ Занятие на {yoga_class.start_time} успешно создано!")
-        return ConversationHandler.END
-
     except ValueError:
         await update.message.reply_text("❌ Количество участников должно быть положительным числом. Отправьте снова.")
         return ENTER_CLASS_CAPACITY
@@ -560,6 +548,29 @@ async def get_class_capacity(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.error(f"Error creating yoga class: {e}")
         await update.message.reply_text("❌ Ошибка при создании занятия. Попробуйте снова.")
         return ConversationHandler.END
+    return ENTER_CLASS_NAME
+
+
+@track_command('get_class_name')
+async def get_class_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name = update.message.text
+    try:
+        user = await get_user(update)
+        yoga_class = YogaClassService.create_yoga_class(
+            name=name,
+            studio=context.user_data['studio_id'],
+            teacher=user.id,
+            start_time=context.user_data['start_time'],
+            duration=context.user_data['duration'],
+            capacity=capacity
+        )
+        await update.message.reply_text(f"✅ Занятие на {yoga_class.start_time} успешно создано!")
+        return ConversationHandler.END
+    except Exception as e:
+        return ConversationHandler.END
+     
+
+
 
 @track_command('cancel_creating_yoga_class')
 async def cancel_creating_yoga_class(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -664,7 +675,8 @@ def setup_handlers(application):
             ],
             ENTER_CLASS_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_class_time)],
             ENTER_CLASS_DURATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_class_duration)],
-            ENTER_CLASS_CAPACITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_class_capacity)]
+            ENTER_CLASS_CAPACITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_class_capacity)],
+            ENTER_CLASS_NAME:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_class_name)]
         },
         fallbacks=[CommandHandler('cancel', cancel_creating_yoga_class)],
         conversation_timeout=1200
