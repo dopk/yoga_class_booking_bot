@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
     ENTER_CLASS_DURATION,
     ENTER_CLASS_CAPACITY,
     ENTER_CLASS_NAME
-) = range(8)
+) = range(9)
 
 
 # region Helpers
@@ -541,15 +541,15 @@ async def get_class_capacity(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if capacity < 1:
             raise ValueError
         context.user_data['capacity'] = capacity
+        await update.message.reply_text(
+            "Отправьте мне название для занятия")
+        return ENTER_CLASS_NAME
     except ValueError:
         await update.message.reply_text("❌ Количество участников должно быть положительным числом. Отправьте снова.")
         return ENTER_CLASS_CAPACITY
     except Exception as e:
-        errors_counter.inc()
-        logger.error(f"Error creating yoga class: {e}")
-        await update.message.reply_text("❌ Ошибка при создании занятия. Попробуйте снова.")
-        return ConversationHandler.END
-    return ENTER_CLASS_NAME
+        await update.message.reply_text("❌ {e}.")
+        return ENTER_CLASS_CAPACITY
 
 
 @track_command('get_class_name')
@@ -565,12 +565,14 @@ async def get_class_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
             duration=context.user_data['duration'],
             capacity=context.user_data['capacity']
         )
-        await update.message.reply_text(f"✅ Занятие на {yoga_class.start_time} успешно создано!")
+        await update.message.reply_text(f"✅ Занятие \"{yoga_class.name}\" на {yoga_class.start_time} успешно создано!")
         return ConversationHandler.END
     except Exception as e:
-        logger.error("something went wrong with creating YogaClass: %s", e)
-        await update.message.reply_text("❌ Что-то пошло не так, попробуйте снова с начала.")
+        errors_counter.inc()
+        logger.error(f"Error creating yoga class: %s", e)
+        await update.message.reply_text("❌ Ошибка при создании занятия. Попробуйте снова.")
         return ConversationHandler.END
+
 
 
 @track_command('cancel_creating_yoga_class')
@@ -677,7 +679,7 @@ def setup_handlers(application):
             ENTER_CLASS_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_class_time)],
             ENTER_CLASS_DURATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_class_duration)],
             ENTER_CLASS_CAPACITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_class_capacity)],
-            ENTER_CLASS_NAME:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_class_name)]
+            ENTER_CLASS_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_class_name)]
         },
         fallbacks=[CommandHandler('cancel', cancel_creating_yoga_class)],
         conversation_timeout=1200

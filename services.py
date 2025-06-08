@@ -40,15 +40,14 @@ class UserService:
 
 class StudioService:
     @staticmethod
-    def create_studio(name: srt, address: str, capacity: int, has_shower: bool, created_by: int):
+    def create_studio(name: str, address: str, capacity: int, has_shower: bool, created_by: int):
         try:
-            Studio.create(
+            return Studio.create(
                 name=name,
                 address=address,
                 capacity=capacity,
                 has_shower=has_shower,
-                created_by=created_by
-            )
+                created_by=created_by)
         except IntegrityError:
             return None
     
