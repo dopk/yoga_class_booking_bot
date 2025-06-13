@@ -16,7 +16,7 @@ from telegram.ext import (
 )
 from config import BOT_TOKEN, ADMINS
 from monitoring import *
-from core.models import *
+from core.models import User, Booking
 from services import *
 
 # Настройка логирования
@@ -215,8 +215,7 @@ async def handle_booking_decision(query, context):
         logger.error(f"Booking {booking_id} not found")
 
 async def handle_teacher_selection(query, context, messenger_id):
-    """Обработка выбора пользователя в качестве учителя."""   
-    target_user, is_maked_teacher = UserService.make_teacher(messenger_id=messenger_id)
+    """Обработка выбора пользователя в качестве учителя."""    target_user, is_maked_teacher = UserService.make_teacher(messenger_id=messenger_id)
     if target_user:
         if is_maked_teacher:
             await query.edit_message_text(
@@ -233,7 +232,6 @@ async def handle_teacher_selection(query, context, messenger_id):
         await query.edit_message_text(
                 text="❌ Что-то пошло не так, попробуйте снова позднее."
             )
-    
 
 async def handle_pagination(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Studio choise pagination."""
@@ -294,9 +292,7 @@ async def show_teacher_selection(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     page_size = 10
-    non_teachers = list(User.select().where(User.is_teacher == False)
-                        .order_by(User.username)
-                        .paginate(page, page_size))
+    non_teachers = UserService.get_no_teachers_w_pagination(page, page_size)
 
     # Create buttons with users
     buttons = [
@@ -380,7 +376,7 @@ async def get_studio_has_shower(update: Update, context: ContextTypes.DEFAULT_TY
     address = context.user_data.get('studio_address')
     capacity = context.user_data.get('capacity')
     has_shower_str = update.message.text
-    created_by = User.get(User.messenger_id == user.messenger_id).id
+    created_by = UserService.get_user_by_messenger_id(user.messenger_id).id
 
     if not name:
         await update.message.reply_text("❌ Ошибка: название не получил. Добавление студии отменено")
@@ -611,6 +607,7 @@ async def show_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error showing schedule: {e}")
         await update.message.reply_text("❌ Произошла ошибка при загрузке расписания.")
 
+
 @track_command('show_my_bookings')
 async def show_my_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показ броней пользователя."""
@@ -690,6 +687,7 @@ def setup_handlers(application):
     application.add_handler(MessageHandler(filters.TEXT, handle_message))
     application.add_handler(CallbackQueryHandler(handle_callback))
 
+
 def main():
     """Основная функция запуска бота."""
     try:
@@ -722,9 +720,11 @@ def main():
         logger.error(f"Fatal error: {e}")
         raise
 
+
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик ошибок."""
     logger.error(f"Update {update} caused error {context.error}")
+
 
 if __name__ == "__main__":
     main()

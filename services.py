@@ -23,6 +23,16 @@ class UserService:
             }
         )
         return user, created
+    
+    @staticmethod
+    def get_no_teachers_w_pagination(page: int, page_size: int) -> list:
+        return list(User.select().where(User.is_teacher == False)
+                        .order_by(User.username)
+                        .paginate(page, page_size))
+    
+    @staticmethod
+    def get_user_by_messenger_id(messenger_id: int):
+        return User.get(User.messenger_id == messenger_id)
 
     @staticmethod
     def make_teacher(messenger_id: int):
@@ -50,11 +60,9 @@ class StudioService:
                 created_by=created_by)
         except IntegrityError:
             return None
-    
     @staticmethod
     def get_studios():
         return list(Studio.select().order_by(Studio.created_at))
-    
     @staticmethod
     def get_studio_by_id(id:int):
         return Studio.get_by_id(id)
@@ -75,7 +83,7 @@ class YogaClassService:
             start_time=start_time,
             duration=duration,
             capacity=capacity)
-    
+
     @staticmethod
     def show_future_class_by_teacher(teacher_id: int):
         return YogaClass.select().where(
@@ -88,8 +96,10 @@ class YogaClassService:
             YogaClass.start_time > datetime.now().where(studio=studio_id)
         ).order_by(YogaClass.start_time)
 
+
 def main():
     pass
+
 
 if __name__ == "__main__":
     main()
