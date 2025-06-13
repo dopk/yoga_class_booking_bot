@@ -236,7 +236,7 @@ async def handle_teacher_selection(query, context, messenger_id):
     
 
 async def handle_pagination(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Studio coise pagination."""
+    """Studio choise pagination."""
     query = update.callback_query
     await query.answer()
 
@@ -587,11 +587,10 @@ async def cancel_creating_yoga_class(update: Update, context: ContextTypes.DEFAU
 @track_command('show_schedule')
 async def show_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показ расписания занятий."""
+    # TODO: должен быть выбор показывать занятия по препроду или по студии.
     try:
         # Получаем будущие занятия
-        classes = YogaClass.select().where(
-            YogaClass.start_time > datetime.now()
-        ).order_by(YogaClass.start_time)
+        classes = YogaClassService.show_future_class_by_teacher(1)
 
         if not classes:
             await update.message.reply_text("На данный момент нет запланированных занятий.")

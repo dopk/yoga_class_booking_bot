@@ -74,7 +74,19 @@ class YogaClassService:
             teacher=teacher_id,
             start_time=start_time,
             duration=duration,
-            capacity=capacity)        
+            capacity=capacity)
+    
+    @staticmethod
+    def show_future_class_by_teacher(teacher_id: int):
+        return YogaClass.select().where(
+            YogaClass.start_time > datetime.now().where(teacher=teacher_id)
+        ).order_by(YogaClass.start_time)
+
+    @staticmethod
+    def show_future_class_by_studio(studio_id: int):
+        return YogaClass.select().where(
+            YogaClass.start_time > datetime.now().where(studio=studio_id)
+        ).order_by(YogaClass.start_time)
 
 def main():
     pass
