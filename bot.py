@@ -16,7 +16,7 @@ from telegram.ext import (
 )
 from config import BOT_TOKEN, ADMINS
 from monitoring import *
-from core.models import User, Booking
+from core.models import User, Booking, initialize_db
 from services import *
 
 # Настройка логирования
@@ -215,7 +215,8 @@ async def handle_booking_decision(query, context):
         logger.error(f"Booking {booking_id} not found")
 
 async def handle_teacher_selection(query, context, messenger_id):
-    """Обработка выбора пользователя в качестве учителя."""    target_user, is_maked_teacher = UserService.make_teacher(messenger_id=messenger_id)
+    """Обработка выбора пользователя в качестве учителя."""
+    target_user, is_maked_teacher = UserService.make_teacher(messenger_id=messenger_id)
     if target_user:
         if is_maked_teacher:
             await query.edit_message_text(
