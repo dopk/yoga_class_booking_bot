@@ -97,9 +97,7 @@ class YogaClassService:
         ).order_by(YogaClass.start_time)
 
 
-def main():
-    pass
-
-
-if __name__ == "__main__":
-    main()
+class BookingService:
+    @staticmethod
+    def get_booking_by_id(booking_id: int):
+        return Booking.get_by_id(booking_id)

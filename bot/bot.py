@@ -2,7 +2,6 @@ from datetime import datetime
 import logging
 import re
 
-from apscheduler.schedulers.background import BackgroundScheduler
 from prometheus_client import start_http_server
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import (
@@ -16,8 +15,8 @@ from telegram.ext import (
 )
 from config import BOT_TOKEN, ADMINS
 from monitoring import *
-from core.models import User, Booking, initialize_db
-from services import *
+from core.models import *
+from core.services import *
 
 # Настройка логирования
 logging.basicConfig(
@@ -190,7 +189,7 @@ async def handle_booking_decision(query, context):
     action, _, booking_id = query.data.partition('_')
 
     try:
-        booking = Booking.get_by_id(booking_id)
+        booking = BookingService.get_booking_by_id(booking_id)
         user = await get_user_from_query(query)
 
         if booking.yoga_class.teacher != user:
@@ -689,43 +688,15 @@ def setup_handlers(application):
     application.add_handler(CallbackQueryHandler(handle_callback))
 
 
-def main():
-    """Основная функция запуска бота."""
-    try:
-        # Инициализация метрик Prometheus
-        start_http_server(8000)
-        logger.info("Prometheus metrics server started on port 8000")
-
-        # Инициализация планировщика задач
-        scheduler = BackgroundScheduler()
-        scheduler.add_job(
-            func=update_database_metrics,
-            trigger='interval',
-            minutes=15
-        )
-        scheduler.start()
-
-        # Инициализация базы данных
-        initialize_db()
-
-        # Создание и настройка приложения бота
-        application = Application.builder().token(BOT_TOKEN).build()
-        setup_handlers(application)
-
-        logger.info("Bot started successfully")
-        # Запуск бота
-        application.run_polling()
-
-    except Exception as e:
-        errors_counter.inc()
-        logger.error(f"Fatal error: {e}")
-        raise
-
-
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик ошибок."""
     logger.error(f"Update {update} caused error {context.error}")
 
 
-if __name__ == "__main__":
-    main()
+def start_bot():
+    # Создание и настройка приложения бота
+    application = Application.builder().token(BOT_TOKEN).build()
+    setup_handlers(application)
+    logger.info("Bot started successfully")
+    # Запуск бота
+    application.run_polling()
