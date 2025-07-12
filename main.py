@@ -1,6 +1,7 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from bot.bot import *
+from core.models import initialize_db
 
 def main():
     """Основная функция запуска бота."""

@@ -1,16 +1,10 @@
 from functools import wraps
-import logging
+from config import logger
 from time import time
 
 from prometheus_client import Counter, Gauge, Histogram
 
 from core.models import User, Studio, YogaClass, Booking
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
 
 
 commands_counter = Counter(

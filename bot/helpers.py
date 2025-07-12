@@ -1,5 +1,6 @@
 import re
-from telegram import Update
+from telegram import Update, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.ext import ContextTypes
 
 from config import ADMINS
 from core.models import User
@@ -41,6 +42,19 @@ def check_no(entered_str: str) -> bool:
     """Check string contains no"""
     words = re.findall(r'\w+', str(entered_str).lower())
     return any(word in {"нет", "no", "false", "0"} for word in words)
+
+async def send_notification(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str):
+    """Send notification to user."""
+    await context.bot.send_message(chat_id=user_id, text=text)
+
+def create_reply_keyboard(buttons_list: list) -> ReplyKeyboardMarkup:
+    """Create Reply Keybord from buttons list."""
+    logger.debug("Creating reply keyboard with buttons: %s", buttons_list)
+    return ReplyKeyboardMarkup(buttons_list, resize_keyboard=True)
+
+def create_inline_keyboard(buttons_list: list) -> InlineKeyboardMarkup:
+    """Create  Inline Keybord from buttons list."""
+    return InlineKeyboardMarkup(buttons_list)
 
 
 def main():
