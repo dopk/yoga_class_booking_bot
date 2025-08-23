@@ -12,8 +12,6 @@ from telegram.ext import (
     ConversationHandler
 )
 from config import BOT_TOKEN, logger
-from core.models import Booking
-from core.services import UserService, YogaClassService
 from monitoring import *
 from .helpers import (
     get_user,
@@ -25,10 +23,6 @@ from .conversations import *
 from .handlers import *
 
 
-
-
-
-
 # bot start
 def setup_handlers(application):
     """Настройка обработчиков команд и сообщений."""
@@ -36,7 +30,6 @@ def setup_handlers(application):
     logger.info("Setting up handlers...")
     application.add_handler(CommandHandler("start", start))
     logger.info("Added start handler")
-
 
     # Обработчики для добавления студии
     studio_conversation = ConversationHandler(
