@@ -1,10 +1,12 @@
+from peewee import DoesNotExist
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from bot.helpers import get_user_from_query, send_notification
 from config import logger
 from core.models import Booking
-from monitoring import track_command
-from core.services import YogaClassService
+from core.services import BookingService, YogaClassService
+from monitoring import errors_counter, track_command
 
 
 @track_command('show_schedule')
@@ -37,6 +39,7 @@ async def show_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error showing schedule: {e}")
         await update.message.reply_text("❌ Произошла ошибка при загрузке расписания.")
+
 
 async def handle_booking_decision(query, context):
     """Handler for bookin decision."""
