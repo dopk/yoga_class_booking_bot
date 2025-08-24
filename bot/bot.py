@@ -13,15 +13,10 @@ from telegram.ext import (
 )
 from config import BOT_TOKEN, logger
 from monitoring import *
-from .helpers import (
-    get_user,
-    is_admin,
-    create_reply_keyboard,
-    create_inline_keyboard
-)
-from .conversations import *
+from .yoga_class.conversations import *
+from .yoga_class.handlers import *
 from .handlers import *
-
+from .studio.conversations import *
 
 # bot start
 def setup_handlers(application):
